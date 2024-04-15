@@ -4,6 +4,11 @@ New implementation of https://github.com/Programvareverkstedet/grzegorz
 
 ## Feature wishlist
 
+- [ ] Feature parity with old grzegorz
+  - [X] Rest API
+  - [ ] Rest API docs
+  - [ ] Metadata fetcher
+  - [ ] Init mpv with image of grzegorz
 - [ ] Save playlists to machine
 - [ ] Cache playlist contents to disk
 - [ ] Expose service through mpd protocol
