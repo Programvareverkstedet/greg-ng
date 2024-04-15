@@ -6,11 +6,14 @@ use std::{
     fs::create_dir_all,
     net::{IpAddr, SocketAddr},
     path::Path,
+    sync::Arc,
 };
-use tokio::process::{Child, Command};
+use tokio::{
+    process::{Child, Command},
+    sync::Mutex,
+};
 
 mod api;
-mod app_error;
 
 #[derive(Parser)]
 struct Args {
@@ -121,8 +124,8 @@ async fn resolve(host: &str) -> anyhow::Result<IpAddr> {
     let addr = format!("{}:0", host);
     let addresses = tokio::net::lookup_host(addr).await?;
     addresses
-        .filter(|addr| addr.is_ipv4())
-        .next()
+        .into_iter()
+        .find(|addr| addr.is_ipv4())
         .map(|addr| addr.ip())
         .ok_or_else(|| anyhow::anyhow!("Failed to resolve address"))
 }
@@ -143,7 +146,8 @@ async fn main() -> anyhow::Result<()> {
     let addr = SocketAddr::new(resolve(&args.host).await?, args.port);
     log::info!("Starting API on {}", addr);
 
-    let app = Router::new().nest("/api", api::api_routes(mpv));
+    let mpv = Arc::new(Mutex::new(mpv));
+    let app = Router::new().nest("/api", api::rest_api_routes(mpv));
 
     if let Some(mut proc) = proc {
         tokio::select! {
