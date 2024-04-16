@@ -9,18 +9,31 @@ readme = "README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+aide = { version = "0.13.4", features = [
+  "axum",
+  "axum-extra",
+  "axum-extra-query",
+  "axum-extra-form",
+  "axum-ws",
+  "macros",
+  "scalar",
+] }
 anyhow = "1.0.82"
-axum = { version = "0.6.20", features = ["macros"] }
+axum = { version = "0.6.20", features = ["macros", "ws"] }
+axum-jsonschema = { version = "0.8.0", features = ["aide"] }
+axum-macros = "0.4.1"
 clap = { version = "4.4.1", features = ["derive"] }
 clap-verbosity-flag = "2.2.2"
 env_logger = "0.10.0"
 log = "0.4.20"
 mpvipc-async = { git = "https://git.pvv.ntnu.no/oysteikt/mpvipc-async.git", rev = "v0.1.0" }
 sd-notify = "0.4.3"
+schemars = "0.8.16"
 serde = { version = "1.0.188", features = ["derive"] }
 serde_json = "1.0.105"
 systemd-journal-logger = "2.2.0"
 tempfile = "3.11.0"
+serde_urlencoded = "0.7.1"
 tokio = { version = "1.32.0", features = ["full"] }
 tower = { version = "0.4.13", features = ["full"] }
 tower-http = { version = "0.4.3", features = ["full"] }
