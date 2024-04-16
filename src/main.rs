@@ -14,6 +14,7 @@ use tokio::{
 };
 
 mod api;
+mod mpv_broker;
 
 #[derive(Parser)]
 struct Args {
