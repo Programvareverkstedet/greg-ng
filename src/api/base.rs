@@ -1,62 +1,61 @@
-use std::sync::Arc;
-
-use log::trace;
-use mpvipc::{
-    Mpv, NumberChangeOptions, PlaylistAddOptions, PlaylistAddTypeOptions, SeekOptions, Switch,
+use mpvipc_async::{
+    LoopProperty, Mpv, MpvExt, NumberChangeOptions, PlaylistAddOptions, PlaylistAddTypeOptions,
+    SeekOptions, Switch,
 };
 use serde_json::{json, Value};
-use tokio::sync::Mutex;
 
 /// Add item to playlist
-pub async fn loadfile(mpv: Arc<Mutex<Mpv>>, path: &str) -> anyhow::Result<()> {
-    trace!("api::loadfile({:?})", path);
-    mpv.lock().await.playlist_add(
+pub async fn loadfile(mpv: Mpv, path: &str) -> anyhow::Result<()> {
+    log::trace!("api::loadfile({:?})", path);
+    mpv.playlist_add(
         path,
         PlaylistAddTypeOptions::File,
         PlaylistAddOptions::Append,
-    )?;
+    )
+    .await?;
 
     Ok(())
 }
 
 /// Check whether the player is paused or playing
-pub async fn play_get(mpv: Arc<Mutex<Mpv>>) -> anyhow::Result<Value> {
-    trace!("api::play_get()");
-    let paused: bool = mpv.lock().await.get_property("pause")?;
+pub async fn play_get(mpv: Mpv) -> anyhow::Result<Value> {
+    log::trace!("api::play_get()");
+    let paused: bool = !mpv.is_playing().await?;
     Ok(json!(!paused))
 }
 
 /// Set whether the player is paused or playing
-pub async fn play_set(mpv: Arc<Mutex<Mpv>>, should_play: bool) -> anyhow::Result<()> {
-    trace!("api::play_set({:?})", should_play);
-    mpv.lock()
+pub async fn play_set(mpv: Mpv, should_play: bool) -> anyhow::Result<()> {
+    log::trace!("api::play_set({:?})", should_play);
+    mpv.set_playback(if should_play { Switch::On } else { Switch::Off })
         .await
-        .set_property("pause", !should_play)
         .map_err(|e| e.into())
 }
 
 /// Get the current player volume
-pub async fn volume_get(mpv: Arc<Mutex<Mpv>>) -> anyhow::Result<Value> {
-    trace!("api::volume_get()");
-    let volume: f64 = mpv.lock().await.get_property("volume")?;
+pub async fn volume_get(mpv: Mpv) -> anyhow::Result<Value> {
+    log::trace!("api::volume_get()");
+    let volume: f64 = mpv.get_volume().await?;
     Ok(json!(volume))
 }
 
 /// Set the player volume
-pub async fn volume_set(mpv: Arc<Mutex<Mpv>>, value: f64) -> anyhow::Result<()> {
-    trace!("api::volume_set({:?})", value);
-    mpv.lock()
+pub async fn volume_set(mpv: Mpv, value: f64) -> anyhow::Result<()> {
+    log::trace!("api::volume_set({:?})", value);
+    mpv.set_volume(value, NumberChangeOptions::Absolute)
         .await
-        .set_volume(value, NumberChangeOptions::Absolute)
         .map_err(|e| e.into())
 }
 
 /// Get current playback position
-pub async fn time_get(mpv: Arc<Mutex<Mpv>>) -> anyhow::Result<Value> {
-    trace!("api::time_get()");
-    let current: f64 = mpv.lock().await.get_property("time-pos")?;
-    let remaining: f64 = mpv.lock().await.get_property("time-remaining")?;
-    let total = current + remaining;
+pub async fn time_get(mpv: Mpv) -> anyhow::Result<Value> {
+    log::trace!("api::time_get()");
+    let current: Option<f64> = mpv.get_time_pos().await?;
+    let remaining: Option<f64> = mpv.get_time_remaining().await?;
+    let total = match (current, remaining) {
+        (Some(c), Some(r)) => Some(c + r),
+        (_, _) => None,
+    };
 
     Ok(json!({
         "current": current,
@@ -66,22 +65,16 @@ pub async fn time_get(mpv: Arc<Mutex<Mpv>>) -> anyhow::Result<Value> {
 }
 
 /// Set playback position
-pub async fn time_set(
-    mpv: Arc<Mutex<Mpv>>,
-    pos: Option<f64>,
-    percent: Option<f64>,
-) -> anyhow::Result<()> {
-    trace!("api::time_set({:?}, {:?})", pos, percent);
+pub async fn time_set(mpv: Mpv, pos: Option<f64>, percent: Option<f64>) -> anyhow::Result<()> {
+    log::trace!("api::time_set({:?}, {:?})", pos, percent);
     if pos.is_some() && percent.is_some() {
         anyhow::bail!("pos and percent cannot be provided at the same time");
     }
 
     if let Some(pos) = pos {
-        mpv.lock().await.seek(pos, SeekOptions::Absolute)?;
+        mpv.seek(pos, SeekOptions::Absolute).await?;
     } else if let Some(percent) = percent {
-        mpv.lock()
-            .await
-            .seek(percent, SeekOptions::AbsolutePercent)?;
+        mpv.seek(percent, SeekOptions::AbsolutePercent).await?;
     } else {
         anyhow::bail!("Either pos or percent must be provided");
     };
@@ -90,10 +83,10 @@ pub async fn time_set(
 }
 
 /// Get the current playlist
-pub async fn playlist_get(mpv: Arc<Mutex<Mpv>>) -> anyhow::Result<Value> {
-    trace!("api::playlist_get()");
-    let playlist: mpvipc::Playlist = mpv.lock().await.get_playlist()?;
-    let is_playing: bool = mpv.lock().await.get_property("pause")?;
+pub async fn playlist_get(mpv: Mpv) -> anyhow::Result<Value> {
+    log::trace!("api::playlist_get()");
+    let playlist: mpvipc_async::Playlist = mpv.get_playlist().await?;
+    let is_playing: bool = mpv.is_playing().await?;
 
     let items: Vec<Value> = playlist
         .0
@@ -104,7 +97,7 @@ pub async fn playlist_get(mpv: Arc<Mutex<Mpv>>) -> anyhow::Result<Value> {
               "index": i,
               "current": item.current,
               "playing": is_playing,
-              "filename": item.filename,
+              "filename": item.title.as_ref().unwrap_or(&item.filename),
               "data": {
                 "fetching": true,
               }
@@ -116,74 +109,64 @@ pub async fn playlist_get(mpv: Arc<Mutex<Mpv>>) -> anyhow::Result<Value> {
 }
 
 /// Skip to the next item in the playlist
-pub async fn playlist_next(mpv: Arc<Mutex<Mpv>>) -> anyhow::Result<()> {
-    trace!("api::playlist_next()");
-    mpv.lock().await.next().map_err(|e| e.into())
+pub async fn playlist_next(mpv: Mpv) -> anyhow::Result<()> {
+    log::trace!("api::playlist_next()");
+    mpv.next().await.map_err(|e| e.into())
 }
 
 /// Go back to the previous item in the playlist
-pub async fn playlist_previous(mpv: Arc<Mutex<Mpv>>) -> anyhow::Result<()> {
-    trace!("api::playlist_previous()");
-    mpv.lock().await.prev().map_err(|e| e.into())
+pub async fn playlist_previous(mpv: Mpv) -> anyhow::Result<()> {
+    log::trace!("api::playlist_previous()");
+    mpv.prev().await.map_err(|e| e.into())
 }
 
 /// Go chosen item in the playlist
-pub async fn playlist_goto(mpv: Arc<Mutex<Mpv>>, index: usize) -> anyhow::Result<()> {
-    trace!("api::playlist_goto({:?})", index);
-    mpv.lock()
-        .await
-        .playlist_play_id(index)
-        .map_err(|e| e.into())
+pub async fn playlist_goto(mpv: Mpv, index: usize) -> anyhow::Result<()> {
+    log::trace!("api::playlist_goto({:?})", index);
+    mpv.playlist_play_id(index).await.map_err(|e| e.into())
 }
 
 /// Clears the playlist
-pub async fn playlist_clear(mpv: Arc<Mutex<Mpv>>) -> anyhow::Result<()> {
-    trace!("api::playlist_clear()");
-    mpv.lock().await.playlist_clear().map_err(|e| e.into())
+pub async fn playlist_clear(mpv: Mpv) -> anyhow::Result<()> {
+    log::trace!("api::playlist_clear()");
+    mpv.playlist_clear().await.map_err(|e| e.into())
 }
 
 /// Remove an item from the playlist by index
-pub async fn playlist_remove(mpv: Arc<Mutex<Mpv>>, index: usize) -> anyhow::Result<()> {
-    trace!("api::playlist_remove({:?})", index);
-    mpv.lock()
-        .await
-        .playlist_remove_id(index)
-        .map_err(|e| e.into())
+pub async fn playlist_remove(mpv: Mpv, index: usize) -> anyhow::Result<()> {
+    log::trace!("api::playlist_remove({:?})", index);
+    mpv.playlist_remove_id(index).await.map_err(|e| e.into())
 }
 
 /// Move an item in the playlist from one index to another
-pub async fn playlist_move(mpv: Arc<Mutex<Mpv>>, from: usize, to: usize) -> anyhow::Result<()> {
-    trace!("api::playlist_move({:?}, {:?})", from, to);
-    mpv.lock()
-        .await
-        .playlist_move_id(from, to)
-        .map_err(|e| e.into())
+pub async fn playlist_move(mpv: Mpv, from: usize, to: usize) -> anyhow::Result<()> {
+    log::trace!("api::playlist_move({:?}, {:?})", from, to);
+    mpv.playlist_move_id(from, to).await.map_err(|e| e.into())
 }
 
 /// Shuffle the playlist
-pub async fn shuffle(mpv: Arc<Mutex<Mpv>>) -> anyhow::Result<()> {
-    trace!("api::shuffle()");
-    mpv.lock().await.playlist_shuffle().map_err(|e| e.into())
+pub async fn shuffle(mpv: Mpv) -> anyhow::Result<()> {
+    log::trace!("api::shuffle()");
+    mpv.playlist_shuffle().await.map_err(|e| e.into())
 }
 
 /// See whether it loops the playlist or not
-pub async fn playlist_get_looping(mpv: Arc<Mutex<Mpv>>) -> anyhow::Result<Value> {
-    trace!("api::playlist_get_looping()");
-    let loop_playlist = mpv.lock().await.get_property_string("loop-playlist")? == "inf";
-    Ok(json!(loop_playlist))
+pub async fn playlist_get_looping(mpv: Mpv) -> anyhow::Result<Value> {
+    log::trace!("api::playlist_get_looping()");
+
+    let loop_status = match mpv.playlist_is_looping().await? {
+        LoopProperty::No => false,
+        LoopProperty::Inf => true,
+        LoopProperty::N(_) => true,
+    };
+
+    Ok(json!(loop_status))
 }
 
-pub async fn playlist_set_looping(mpv: Arc<Mutex<Mpv>>, r#loop: bool) -> anyhow::Result<()> {
-    trace!("api::playlist_set_looping({:?})", r#loop);
-    if r#loop {
-        mpv.lock()
-            .await
-            .set_loop_playlist(Switch::On)
-            .map_err(|e| e.into())
-    } else {
-        mpv.lock()
-            .await
-            .set_loop_playlist(Switch::Off)
-            .map_err(|e| e.into())
-    }
+pub async fn playlist_set_looping(mpv: Mpv, r#loop: bool) -> anyhow::Result<()> {
+    log::trace!("api::playlist_set_looping({:?})", r#loop);
+
+    mpv.set_loop_playlist(if r#loop { Switch::On } else { Switch::Off })
+        .await
+        .map_err(|e| e.into())
 }

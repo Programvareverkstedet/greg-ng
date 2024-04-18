@@ -1,17 +1,13 @@
 use anyhow::Context;
 use axum::{Router, Server};
 use clap::Parser;
-use mpvipc::Mpv;
+use mpvipc_async::Mpv;
 use std::{
     fs::create_dir_all,
     net::{IpAddr, SocketAddr},
     path::Path,
-    sync::Arc,
 };
-use tokio::{
-    process::{Child, Command},
-    sync::Mutex,
-};
+use tokio::process::{Child, Command};
 
 mod api;
 
@@ -84,9 +80,9 @@ async fn connect_to_mpv(args: &MpvConnectionArgs) -> anyhow::Result<(Mpv, Option
                 .arg(format!("--input-ipc-server={}", &args.socket_path))
                 .arg("--idle")
                 .arg("--force-window")
-                // .arg("--fullscreen")
+                .arg("--fullscreen")
                 // .arg("--no-terminal")
-                // .arg("--load-unsafe-playlists")
+                .arg("--load-unsafe-playlists")
                 .arg("--keep-open") // Keep last frame of video on end of video
                 .spawn()
                 .context("Failed to start mpv")?,
@@ -112,7 +108,7 @@ async fn connect_to_mpv(args: &MpvConnectionArgs) -> anyhow::Result<(Mpv, Option
     }
 
     Ok((
-        Mpv::connect(&args.socket_path).context(format!(
+        Mpv::connect(&args.socket_path).await.context(format!(
             "Failed to connect to mpv socket: {}",
             &args.socket_path
         ))?,
@@ -146,25 +142,27 @@ async fn main() -> anyhow::Result<()> {
     let addr = SocketAddr::new(resolve(&args.host).await?, args.port);
     log::info!("Starting API on {}", addr);
 
-    let mpv = Arc::new(Mutex::new(mpv));
-    let app = Router::new().nest("/api", api::rest_api_routes(mpv));
+    let app = Router::new().nest("/api", api::rest_api_routes(mpv.clone()));
 
     if let Some(mut proc) = proc {
         tokio::select! {
-          exit_status = proc.wait() => {
-              log::warn!("mpv process exited with status: {}", exit_status?);
-          }
-          _ = tokio::signal::ctrl_c() => {
-              log::info!("Received Ctrl-C, exiting");
-              proc.kill().await?;
-          }
-          result = async {
+            exit_status = proc.wait() => {
+                log::warn!("mpv process exited with status: {}", exit_status?);
+                mpv.disconnect().await?;
+            }
+            _ = tokio::signal::ctrl_c() => {
+                log::info!("Received Ctrl-C, exiting");
+                mpv.disconnect().await?;
+                proc.kill().await?;
+            }
+            result = async {
               match Server::try_bind(&addr.clone()).context("Failed to bind server") {
                 Ok(server) => server.serve(app.into_make_service()).await.context("Failed to serve app"),
                 Err(err) => Err(err),
               }
             } => {
               log::info!("API server exited");
+              mpv.disconnect().await?;
               proc.kill().await?;
               result?;
             }
@@ -173,9 +171,11 @@ async fn main() -> anyhow::Result<()> {
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {
                 log::info!("Received Ctrl-C, exiting");
+                mpv.disconnect().await?;
             }
             _ =  Server::bind(&addr.clone()).serve(app.into_make_service()) => {
                 log::info!("API server exited");
+                mpv.disconnect().await?;
             }
         }
     }
