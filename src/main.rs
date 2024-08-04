@@ -1,7 +1,8 @@
 use anyhow::Context;
 use axum::{Router, Server};
 use clap::Parser;
-use mpvipc_async::Mpv;
+use futures::StreamExt;
+use mpvipc_async::{parse_property, Mpv, MpvExt, Switch};
 use std::{
     fs::create_dir_all,
     net::{IpAddr, SocketAddr},
@@ -155,6 +156,43 @@ async fn main() -> anyhow::Result<()> {
                 mpv.disconnect().await?;
                 proc.kill().await?;
             }
+          /* DEBUG */
+          _ = async {
+              let mut event_stream = mpv.get_event_stream().await;
+              mpv.set_playback(Switch::Off).await.unwrap();
+              mpv.observe_property(1, "volume").await.unwrap();
+              mpv.observe_property(2, "pause").await.unwrap();
+              mpv.observe_property(3, "time-pos").await.unwrap();
+              mpv.observe_property(4, "duration").await.unwrap();
+              mpv.observe_property(5, "playlist").await.unwrap();
+              mpv.observe_property(6, "playlist-pos").await.unwrap();
+              mpv.observe_property(7, "tick").await.unwrap();
+              mpv.observe_property(8, "eof-reached").await.unwrap();
+              mpv.observe_property(9, "speed").await.unwrap();
+              mpv.observe_property(10, "filename").await.unwrap();
+              mpv.observe_property(11, "media-title").await.unwrap();
+              mpv.observe_property(12, "loop-file").await.unwrap();
+              mpv.observe_property(13, "loop-playlist").await.unwrap();
+              mpv.observe_property(14, "mute").await.unwrap();
+
+              loop {
+                let event = event_stream.next().await;
+                if let Some(Ok(event)) = event {
+                    match &event {
+                      mpvipc_async::Event::PropertyChange { name, data, id } => {
+                        let parsed_event_property = parse_property(name, data.clone());
+                        log::info!("PropertyChange({}): {:#?}", id, parsed_event_property);
+                      }
+                      event => {
+                        log::info!("Event: {:?}", event);
+                      }
+                    }
+                }
+              }
+          } => {
+
+          }
+          /* END_DEBUG */
             result = async {
               match Server::try_bind(&addr.clone()).context("Failed to bind server") {
                 Ok(server) => server.serve(app.into_make_service()).await.context("Failed to serve app"),

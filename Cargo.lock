@@ -480,6 +480,7 @@ dependencies = [
  "axum",
  "clap",
  "env_logger",
+ "futures",
  "log",
  "mpvipc-async",
  "serde",
@@ -711,7 +712,6 @@ dependencies = [
 [[package]]
 name = "mpvipc-async"
 version = "0.1.0"
-source = "git+https://git.pvv.ntnu.no/oysteikt/mpvipc-async.git?rev=v0.1.0#467cac3c503887c4d6371ec5fdf1b23b3e0eb515"
 dependencies = [
  "futures",
  "log",

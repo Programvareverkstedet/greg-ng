@@ -10,8 +10,9 @@ anyhow = "1.0.82"
 axum = { version = "0.6.20", features = ["macros"] }
 clap = { version = "4.4.1", features = ["derive"] }
 env_logger = "0.10.0"
+futures = "0.3.30"
 log = "0.4.20"
-mpvipc-async = { git = "https://git.pvv.ntnu.no/oysteikt/mpvipc-async.git", rev = "v0.1.0" }
+mpvipc-async = { path = "../mpvipc-async" }
 serde = { version = "1.0.188", features = ["derive"] }
 serde_json = "1.0.105"
 tokio = { version = "1.32.0", features = ["full"] }
