@@ -8,6 +8,8 @@
 
   outputs = { self, nixpkgs, rust-overlay }:
   let
+    inherit (nixpkgs) lib;
+
     systems = [
       "x86_64-linux"
       "aarch64-linux"
@@ -15,7 +17,8 @@
       "aarch64-darwin"
       "armv7l-linux"
     ];
-    forAllSystems = f: nixpkgs.lib.genAttrs systems (system: let
+
+    forAllSystems = f: lib.genAttrs systems (system: let
       pkgs = import nixpkgs {
         inherit system;
         overlays = [
@@ -27,6 +30,16 @@
       toolchain = rust-bin.stable.latest.default;
     in f system pkgs toolchain);
   in {
+    apps = forAllSystems (system: pkgs: _: {
+      default = self.apps.${system}.greg-ng;
+      greg-ng = let
+        package = self.packages.${system}.greg-ng;
+      in {
+        type = "app";
+        program = lib.getExe package;
+      };
+    });
+
     devShells = forAllSystems (system: pkgs: toolchain: {
       default = pkgs.mkShell {
         nativeBuildInputs = [
@@ -36,6 +49,11 @@
 
         RUST_SRC_PATH = "${toolchain}/lib/rustlib/src/rust/library";
       };
+    });
+
+    packages = forAllSystems (system: pkgs: _: {
+      default = self.packages.${system}.greg-ng;
+      greg-ng = pkgs.callPackage ./default.nix { };
     });
   };
 }
