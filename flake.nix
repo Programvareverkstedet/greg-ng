@@ -51,9 +51,18 @@
       };
     });
 
+    overlays = {
+      default = self.overlays.greg-ng;
+      greg-ng = final: prev: {
+        inherit (self.packages.${prev.system}) greg-ng;
+      };
+    };
+
     packages = forAllSystems (system: pkgs: _: {
       default = self.packages.${system}.greg-ng;
       greg-ng = pkgs.callPackage ./default.nix { };
     });
+  } // {
+    nixosModules.default = ./module.nix;
   };
 }
