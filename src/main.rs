@@ -4,9 +4,11 @@ use clap::Parser;
 use mpvipc_async::Mpv;
 use std::{
     fs::create_dir_all,
+    io::Write,
     net::{IpAddr, SocketAddr},
     path::Path,
 };
+use tempfile::NamedTempFile;
 use tokio::process::{Child, Command};
 
 mod api;
@@ -25,6 +27,9 @@ struct Args {
     #[clap(long, value_name = "PATH")]
     mpv_executable_path: Option<String>,
 
+    #[clap(long, value_name = "PATH")]
+    mpv_config_file: Option<String>,
+
     #[clap(long, default_value = "true")]
     auto_start_mpv: bool,
 
@@ -32,14 +37,39 @@ struct Args {
     force_auto_start: bool,
 }
 
-struct MpvConnectionArgs {
+struct MpvConnectionArgs<'a> {
     socket_path: String,
     executable_path: Option<String>,
+    config_file: &'a NamedTempFile,
     auto_start: bool,
     force_auto_start: bool,
 }
 
-async fn connect_to_mpv(args: &MpvConnectionArgs) -> anyhow::Result<(Mpv, Option<Child>)> {
+const DEFAULT_MPV_CONFIG_CONTENT: &str = include_str!("../assets/default-mpv.conf");
+
+fn create_mpv_config_file(args_config_file: Option<String>) -> anyhow::Result<NamedTempFile> {
+    let file_content = if let Some(path) = args_config_file {
+        if !Path::new(&path).exists() {
+            anyhow::bail!("Mpv config file not found at {}", &path);
+        }
+
+        std::fs::read_to_string(&path).context("Failed to read mpv config file")?
+    } else {
+        DEFAULT_MPV_CONFIG_CONTENT.to_string()
+    };
+
+    let tmpfile = tempfile::Builder::new()
+        .prefix("mpv-")
+        .rand_bytes(8)
+        .suffix(".conf")
+        .tempfile()?;
+
+    tmpfile.reopen()?.write_all(file_content.as_bytes())?;
+
+    Ok(tmpfile)
+}
+
+async fn connect_to_mpv<'a>(args: &MpvConnectionArgs<'a>) -> anyhow::Result<(Mpv, Option<Child>)> {
     log::debug!("Connecting to mpv");
 
     debug_assert!(
@@ -81,6 +111,11 @@ async fn connect_to_mpv(args: &MpvConnectionArgs) -> anyhow::Result<(Mpv, Option
                 .arg("--idle")
                 .arg("--force-window")
                 .arg("--fullscreen")
+                .arg("--no-config")
+                .arg(format!(
+                    "--include={}",
+                    &args.config_file.path().to_string_lossy()
+                ))
                 // .arg("--no-terminal")
                 .arg("--load-unsafe-playlists")
                 .arg("--keep-open") // Keep last frame of video on end of video
@@ -131,9 +166,12 @@ async fn main() -> anyhow::Result<()> {
     env_logger::init();
     let args = Args::parse();
 
+    let mpv_config_file = create_mpv_config_file(args.mpv_config_file)?;
+
     let (mpv, proc) = connect_to_mpv(&MpvConnectionArgs {
         socket_path: args.mpv_socket_path,
         executable_path: args.mpv_executable_path,
+        config_file: &mpv_config_file,
         auto_start: args.auto_start_mpv,
         force_auto_start: args.force_auto_start,
     })
@@ -179,6 +217,8 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     }
+
+    std::mem::drop(mpv_config_file);
 
     Ok(())
 }
