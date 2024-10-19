@@ -97,14 +97,48 @@ in
         description = "greg-ng, an mpv based media player";
         wantedBy = [ "graphical-session.target" ];
         partOf = [ "graphical-session.target" ];
-        environment = {
-          RUST_LOG = lib.mkIf cfg.enableDebug "greg_ng=trace,mpvipc=trace";
-        };
+        environment.RUST_LOG = lib.mkIf cfg.enableDebug "greg_ng=trace,mpvipc=trace";
         serviceConfig = {
           Type = "simple";
           ExecStart = "${lib.getExe cfg.package} ${lib.cli.toGNUCommandLineShell { } cfg.settings}";
           Restart = "always";
           RestartSec = 3;
+
+          RestrictAddressFamilies = [ "AF_UNIX" "AF_INET" "AF_INET6" ];
+          AmbientCapabilities = [ "" ];
+          CapabilityBoundingSet = [ "" ];
+          DeviceAllow = [ "" ];
+          LockPersonality = true;
+          # Might work, but wouldn't bet on it with embedded lua in mpv
+          MemoryDenyWriteExecute = false;
+          NoNewPrivileges = true;
+          # MPV and mesa tries to talk directly to the GPU.
+          PrivateDevices = false;
+          PrivateMounts = true;
+          PrivateTmp = true;
+          PrivateUsers = true;
+          ProcSubset = "pid";
+          ProtectClock = true;
+          ProtectControlGroups = true;
+          # MPV wants ~/.cache
+          ProtectHome = false;
+          ProtectHostname = true;
+          ProtectKernelLogs = true;
+          ProtectKernelModules = true;
+          ProtectKernelTunables = true;
+          ProtectProc = "invisible";
+          ProtectSystem = "full";
+          RemoveIPC = true;
+          UMask = "0077";
+          RestrictNamespaces = true;
+          RestrictRealtime = true;
+          RestrictSUIDSGID = true;
+          SystemCallArchitectures = "native";
+          SystemCallFilter = [
+            "@system-service"
+            "~@privileged"
+            "~@resources"
+          ];
         };
       };
     })
