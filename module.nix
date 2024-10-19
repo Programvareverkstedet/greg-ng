@@ -10,6 +10,10 @@ in
 
     mpvPackage = lib.mkPackageOption pkgs "mpv" { };
 
+    enableSway = lib.mkEnableOption "sway as the main window manager";
+
+    enablePipewire = lib.mkEnableOption "pipewire" // { default = true; };
+
     # TODO: create some better descriptions
     settings = {
       host = lib.mkOption {
@@ -75,24 +79,60 @@ in
     };
   };
 
-  config = {
-    services.cage.enable = true;
-    services.cage.program =let
-      flags = lib.cli.toGNUCommandLineShell { } cfg.settings;
-    in pkgs.writeShellScript "greg-kiosk" ''
-      cd $(mktemp -d)
-
-      ${lib.getExe cfg.package} ${flags}
-    '';
-    services.cage.user = "greg";
-    users.users."greg".isNormalUser = true;
-    system.activationScripts = {
-      base-dirs = {
-        text = ''
-          mkdir -p /nix/var/nix/profiles/per-user/greg
-        '';
-        deps = [];
+  config = lib.mkMerge [
+    (lib.mkIf cfg.enable {
+      users = {
+        users.greg = {
+          isNormalUser = true;
+          group = "greg";
+          uid = 2000;
+          description = "loud gym bro";
+        };
+        groups.greg.gid = 2000;
       };
-    };
-  };
+
+      systemd.user.services.greg-ng = {
+        description = "greg-ng, an mpv based media player";
+        wantedBy = [ "graphical-session.target" ];
+        partOf = [ "graphical-session.target" ];
+        serviceConfig = {
+          Type = "simple";
+          ExecStart = "${lib.getExe cfg.package} ${lib.cli.toGNUCommandLineShell { } cfg.settings}";
+          Restart = "always";
+          RestartSec = 3;
+        };
+      };
+    })
+    (lib.mkIf (cfg.enable && cfg.enablePipewire) {
+      services.pipewire = {
+        enable = true;
+        alsa.enable = true;
+        alsa.support32Bit = true;
+        pulse.enable = true;
+      };
+    })
+    (lib.mkIf (cfg.enable && cfg.enableSway) {
+      programs.sway = {
+        enable = true;
+        wrapperFeatures.gtk = true;
+      };
+
+      xdg.portal = {
+        enable = true;
+        wlr.enable = true;
+        extraPortals = [ pkgs.xdg-desktop-portal-gtk ];
+      };
+
+      services.greetd = {
+        enable = true;
+        settings = rec {
+          initial_session = {
+            command = "${pkgs.sway}/bin/sway";
+            user = "greg";
+          };
+          default_session = initial_session;
+        };
+      };
+    })
+  ];
 }
