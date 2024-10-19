@@ -1,13 +1,15 @@
 use std::{fs::create_dir_all, io::Write, path::Path};
 
 use anyhow::Context;
-use mpvipc_async::Mpv;
+use mpvipc_async::{Mpv, MpvExt};
 use tempfile::NamedTempFile;
 use tokio::process::{Child, Command};
 
 use crate::MpvConnectionArgs;
 
 const DEFAULT_MPV_CONFIG_CONTENT: &str = include_str!("../assets/default-mpv.conf");
+
+const THE_MAN_PNG: &[u8] = include_bytes!("../assets/the_man.png");
 
 pub fn create_mpv_config_file(args_config_file: Option<String>) -> anyhow::Result<NamedTempFile> {
     let file_content = if let Some(path) = args_config_file {
@@ -113,5 +115,21 @@ pub async fn connect_to_mpv<'a>(
         ))?,
         process_handle,
     ))
+}
+
+pub async fn show_grzegorz_image(mpv: Mpv) -> anyhow::Result<()> {
+    let path = std::env::temp_dir().join("the_man.png");
+    std::fs::write(path.as_path(), THE_MAN_PNG)?;
+
+    mpv.playlist_clear().await?;
+    mpv.playlist_add(
+        path.to_string_lossy().as_ref(),
+        mpvipc_async::PlaylistAddTypeOptions::File,
+        mpvipc_async::PlaylistAddOptions::Append,
+    )
+    .await?;
+    mpv.next().await?;
+
+    Ok(())
 }
 

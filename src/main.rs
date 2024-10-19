@@ -1,7 +1,7 @@
 use anyhow::Context;
 use axum::{Router, Server};
 use clap::Parser;
-use mpv_setup::{connect_to_mpv, create_mpv_config_file};
+use mpv_setup::{connect_to_mpv, create_mpv_config_file, show_grzegorz_image};
 use std::net::{IpAddr, SocketAddr};
 use tempfile::NamedTempFile;
 
@@ -65,6 +65,8 @@ async fn main() -> anyhow::Result<()> {
         force_auto_start: args.force_auto_start,
     })
     .await?;
+
+    show_grzegorz_image(mpv.clone()).await?;
 
     let addr = SocketAddr::new(resolve(&args.host).await?, args.port);
     log::info!("Starting API on {}", addr);
