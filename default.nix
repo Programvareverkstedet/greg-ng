@@ -13,12 +13,19 @@ rustPlatform.buildRustPackage rec {
     baseName = baseNameOf (toString path);
   in !(lib.any (b: b) [
       (!(lib.cleanSourceFilter path type))
-      (baseName == "target" && type == "directory")
-      (baseName == "nix" && type == "directory")
-      (baseName == "flake.nix" && type == "regular")
-      (baseName == "flake.lock" && type == "regular")
+      (type == "directory" && lib.elem baseName [
+        ".direnv"
+        ".git"
+        "target"
+        "result"
+      ])
+      (type == "regular" && lib.elem baseName [
+        "flake.nix"
+        "default.nix"
+        "module.nix"
+        ".envrc"
+      ])
     ])) ./.;
-
 
   nativeBuildInputs = [ makeWrapper ];
 
