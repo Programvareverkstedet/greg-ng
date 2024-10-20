@@ -14,6 +14,8 @@ in
 
     enablePipewire = lib.mkEnableOption "pipewire" // { default = true; };
 
+    enableDebug = lib.mkEnableOption "debug logs";
+
     # TODO: create some better descriptions
     settings = {
       host = lib.mkOption {
@@ -95,6 +97,9 @@ in
         description = "greg-ng, an mpv based media player";
         wantedBy = [ "graphical-session.target" ];
         partOf = [ "graphical-session.target" ];
+        environment = {
+          RUST_LOG = lib.mkIf cfg.enableDebug "greg_ng=trace,mpvipc=trace";
+        };
         serviceConfig = {
           Type = "simple";
           ExecStart = "${lib.getExe cfg.package} ${lib.cli.toGNUCommandLineShell { } cfg.settings}";
