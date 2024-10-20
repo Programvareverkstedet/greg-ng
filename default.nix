@@ -9,7 +9,16 @@
 rustPlatform.buildRustPackage rec {
   pname = "greg-ng";
   version = "0.1.0";
-  src = lib.cleanSource ./.;
+  src = builtins.filterSource (path: type: let
+    baseName = baseNameOf (toString path);
+  in !(lib.any (b: b) [
+      (!(lib.cleanSourceFilter path type))
+      (baseName == "target" && type == "directory")
+      (baseName == "nix" && type == "directory")
+      (baseName == "flake.nix" && type == "regular")
+      (baseName == "flake.lock" && type == "regular")
+    ])) ./.;
+
 
   nativeBuildInputs = [ makeWrapper ];
 
