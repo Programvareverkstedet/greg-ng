@@ -83,16 +83,6 @@ in
 
   config = lib.mkMerge [
     (lib.mkIf cfg.enable {
-      users = {
-        users.greg = {
-          isNormalUser = true;
-          group = "greg";
-          uid = 2000;
-          description = "loud gym bro";
-        };
-        groups.greg.gid = 2000;
-      };
-
       systemd.user.services.greg-ng = {
         description = "greg-ng, an mpv based media player";
         wantedBy = [ "graphical-session.target" ];
@@ -160,6 +150,16 @@ in
         enable = true;
         wlr.enable = true;
         extraPortals = [ pkgs.xdg-desktop-portal-gtk ];
+      };
+
+      users = {
+        users.greg = {
+          isNormalUser = true;
+          group = "greg";
+          uid = 2000;
+          description = "loud gym bro";
+        };
+        groups.greg.gid = 2000;
       };
 
       services.greetd = {
