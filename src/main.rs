@@ -66,7 +66,9 @@ async fn main() -> anyhow::Result<()> {
     })
     .await?;
 
-    show_grzegorz_image(mpv.clone()).await?;
+    if let Err(e) = show_grzegorz_image(mpv.clone()).await {
+      log::warn!("Could not show Grzegorz image: {}", e);
+    }
 
     let addr = SocketAddr::new(resolve(&args.host).await?, args.port);
     log::info!("Starting API on {}", addr);
