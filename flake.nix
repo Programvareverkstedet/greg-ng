@@ -35,7 +35,7 @@
     apps = forAllSystems (system: pkgs: _: {
       default = self.apps.${system}.greg-ng;
       greg-ng = let
-        package = self.packages.${system}.greg-ng;
+        package = self.packages.${system}.greg-ng-wrapped;
       in {
         type = "app";
         program = lib.getExe package;
@@ -63,6 +63,9 @@
     packages = forAllSystems (system: pkgs: _: {
       default = self.packages.${system}.greg-ng;
       greg-ng = pkgs.callPackage ./default.nix { };
+      greg-ng-wrapped = pkgs.callPackage ./default.nix {
+        wrapped = true;
+      };
     });
   } // {
     nixosModules.default = ./module.nix;

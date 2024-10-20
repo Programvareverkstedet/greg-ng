@@ -4,6 +4,7 @@
 , rustPlatform
 , makeWrapper
 , mpv
+, wrapped ? false
 }:
 
 rustPlatform.buildRustPackage rec {
@@ -36,7 +37,7 @@ rustPlatform.buildRustPackage rec {
     };
   };
 
-  postInstall = ''
+  postInstall = lib.optionalString wrapped ''
     wrapProgram $out/bin/greg-ng \
       --prefix PATH : '${lib.makeBinPath [ mpv ]}'
   '';
