@@ -14,7 +14,19 @@ in
 
     enablePipewire = lib.mkEnableOption "pipewire" // { default = true; };
 
-    enableDebug = lib.mkEnableOption "debug logs";
+    logLevel = lib.mkOption {
+      type = lib.types.enum [ "quiet" "error" "warn" "info" "debug" "trace" ];
+      default = "debug";
+      description = "Log level.";
+      apply = level: {
+        "quiet" = "-q";
+        "error" = "";
+        "warn" = "-v";
+        "info" = "-vv";
+        "debug" = "-vvv";
+        "trace" = "-vvvv";
+      }.${level};
+    };
 
     # TODO: create some better descriptions
     settings = {
@@ -87,12 +99,18 @@ in
         description = "greg-ng, an mpv based media player";
         wantedBy = [ "graphical-session.target" ];
         partOf = [ "graphical-session.target" ];
-        environment.RUST_LOG = lib.mkIf cfg.enableDebug "greg_ng=trace,mpvipc=trace";
         serviceConfig = {
-          Type = "simple";
-          ExecStart = "${lib.getExe cfg.package} ${lib.cli.toGNUCommandLineShell { } cfg.settings}";
+          Type = "notify";
+          ExecStart = let
+            args = lib.cli.toGNUCommandLineShell { } (cfg.settings // {
+              systemd = true;
+            });
+          in "${lib.getExe cfg.package} ${cfg.logLevel} ${args}";
+
           Restart = "always";
           RestartSec = 3;
+          WatchdogSec = lib.mkDefault 15;
+          TimeoutStartSec = lib.mkDefault 30;
 
           RestrictAddressFamilies = [ "AF_UNIX" "AF_INET" "AF_INET6" ];
           AmbientCapabilities = [ "" ];
