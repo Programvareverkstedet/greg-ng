@@ -27,7 +27,9 @@
       };
 
       rust-bin = rust-overlay.lib.mkRustBin { } pkgs.buildPackages;
-      toolchain = rust-bin.stable.latest.default;
+      toolchain = rust-bin.stable.latest.default.override {
+        extensions = [ "rust-src" "rust-analyzer" "rust-std" ];
+      };
     in f system pkgs toolchain);
   in {
     apps = forAllSystems (system: pkgs: _: {
