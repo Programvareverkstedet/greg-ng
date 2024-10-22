@@ -135,18 +135,20 @@ in
           ProtectKernelModules = true;
           ProtectKernelTunables = true;
           ProtectProc = "invisible";
-          ProtectSystem = "full";
+          # I'll figure it out sometime
+          # ProtectSystem = "full";
           RemoveIPC = true;
           UMask = "0077";
           RestrictNamespaces = true;
           RestrictRealtime = true;
           RestrictSUIDSGID = true;
           SystemCallArchitectures = "native";
-          SystemCallFilter = [
-            "@system-service"
-            "~@privileged"
-            "~@resources"
-          ];
+          # Something brokey
+          # SystemCallFilter = [
+          #   "@system-service"
+          #   "~@privileged"
+          #   "~@resources"
+          # ];
         };
       };
     })
