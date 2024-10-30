@@ -1,5 +1,5 @@
 use anyhow::Context;
-use axum::{Router, Server};
+use axum::Router;
 use clap::Parser;
 use clap_verbosity_flag::Verbosity;
 use mpv_setup::{connect_to_mpv, create_mpv_config_file, show_grzegorz_image};
@@ -89,8 +89,12 @@ async fn setup_systemd_watchdog_thread() -> anyhow::Result<()> {
 
 async fn shutdown(mpv: Mpv, proc: Option<tokio::process::Child>) {
     log::info!("Shutting down");
-    sd_notify::notify(false, &[sd_notify::NotifyState::Stopping])
-        .unwrap_or_else(|e| log::warn!("Failed to notify systemd that the service is stopping: {}", e));
+    sd_notify::notify(false, &[sd_notify::NotifyState::Stopping]).unwrap_or_else(|e| {
+        log::warn!(
+            "Failed to notify systemd that the service is stopping: {}",
+            e
+        )
+    });
 
     mpv.disconnect()
         .await
@@ -156,11 +160,15 @@ async fn main() -> anyhow::Result<()> {
     let socket_addr = SocketAddr::new(addr, args.port);
     log::info!("Starting API on {}", socket_addr);
 
-    let app = Router::new().nest("/api", api::rest_api_routes(mpv.clone()));
-    let server = match Server::try_bind(&socket_addr.clone())
+    let app = Router::new()
+        .nest("/api", api::rest_api_routes(mpv.clone()))
+        .merge(api::rest_api_docs(mpv.clone()));
+
+    let listener = match tokio::net::TcpListener::bind(&socket_addr)
+        .await
         .context(format!("Failed to bind API server to '{}'", &socket_addr))
     {
-        Ok(server) => server,
+        Ok(listener) => listener,
         Err(e) => {
             log::error!("{}", e);
             shutdown(mpv, proc).await;
@@ -191,7 +199,7 @@ async fn main() -> anyhow::Result<()> {
                 log::info!("Received Ctrl-C, exiting");
                 shutdown(mpv, Some(proc)).await;
             }
-            result = server.serve(app.into_make_service()) => {
+            result = axum::serve(listener, app.into_make_service()) => {
               log::info!("API server exited");
               shutdown(mpv, Some(proc)).await;
               result?;
@@ -203,7 +211,7 @@ async fn main() -> anyhow::Result<()> {
                 log::info!("Received Ctrl-C, exiting");
                 shutdown(mpv.clone(), None).await;
             }
-            result = server.serve(app.into_make_service()) => {
+            result = axum::serve(listener, app.into_make_service()) => {
               log::info!("API server exited");
               shutdown(mpv.clone(), None).await;
               result?;
