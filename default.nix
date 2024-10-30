@@ -22,6 +22,7 @@ rustPlatform.buildRustPackage rec {
       ])
       (type == "regular" && lib.elem baseName [
         "flake.nix"
+        "flake.lock"
         "default.nix"
         "module.nix"
         ".envrc"
