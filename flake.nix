@@ -38,7 +38,9 @@
         package = self.packages.${system}.greg-ng-wrapped;
       in {
         type = "app";
-        program = lib.getExe package;
+        program = toString (pkgs.writeShellScript "greg-ng" ''
+          ${lib.getExe package} --mpv-socket-path /tmp/greg-ng-mpv.sock -vvvv
+        '');
       };
     });
 
