@@ -11,6 +11,9 @@ const DEFAULT_MPV_CONFIG_CONTENT: &str = include_str!("../assets/default-mpv.con
 
 const THE_MAN_PNG: &[u8] = include_bytes!("../assets/the_man.png");
 
+// https://mpv.io/manual/master/#options-ytdl
+const YTDL_HOOK_ARGS: [&str; 2] = ["try_ytdl_first=yes", "thumbnails=none"];
+
 pub fn create_mpv_config_file(args_config_file: Option<String>) -> anyhow::Result<NamedTempFile> {
     let file_content = if let Some(path) = args_config_file {
         if !Path::new(&path).exists() {
@@ -78,6 +81,13 @@ pub async fn connect_to_mpv<'a>(
                 .arg("--force-window")
                 .arg("--fullscreen")
                 .arg("--no-config")
+                .arg("--ytdl=yes")
+                .args(
+                    YTDL_HOOK_ARGS
+                        .into_iter()
+                        .map(|x| format!("--script-opts=ytdl_hook-{}", x))
+                        .collect::<Vec<_>>(),
+                )
                 .arg(format!(
                     "--include={}",
                     &args.config_file.path().to_string_lossy()
@@ -132,4 +142,3 @@ pub async fn show_grzegorz_image(mpv: Mpv) -> anyhow::Result<()> {
 
     Ok(())
 }
-
