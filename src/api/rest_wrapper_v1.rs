@@ -41,10 +41,7 @@ pub fn rest_api_docs(mpv: Mpv) -> Router {
         .routes(routes!(play_get, play_set))
         .routes(routes!(volume_get, volume_set))
         .routes(routes!(time_get, time_set))
-        .routes(routes!(
-          playlist_get,
-          playlist_remove_or_clear
-        ))
+        .routes(routes!(playlist_get, playlist_remove_or_clear))
         .routes(routes!(playlist_next))
         .routes(routes!(playlist_previous))
         .routes(routes!(playlist_goto))
@@ -64,12 +61,10 @@ pub fn rest_api_docs(mpv: Mpv) -> Router {
 //       but they all had issues). Feel free to replace this with a better solution.
 
 #[derive(OpenApi)]
-#[openapi(
-    info(
-      description = "The legacy Grzegorz Brzeczyszczykiewicz API, used to control a running mpv instance",
-      version = "1.0.0",
-    ),
-)]
+#[openapi(info(
+    description = "The legacy Grzegorz Brzeczyszczykiewicz API, used to control a running mpv instance",
+    version = "1.0.0",
+))]
 struct ApiDoc;
 
 #[derive(serde::Serialize, utoipa::ToSchema)]
@@ -135,7 +130,6 @@ impl IntoResponse for RestResponse {
 struct LoadFileArgs {
     path: String,
 }
-
 
 /// Add item to playlist
 #[utoipa::path(
