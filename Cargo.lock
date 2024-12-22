@@ -604,6 +604,7 @@ dependencies = [
  "clap",
  "clap-verbosity-flag",
  "env_logger",
+ "futures",
  "log",
  "mpvipc-async",
  "sd-notify",

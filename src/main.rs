@@ -2,11 +2,13 @@ use anyhow::Context;
 use axum::Router;
 use clap::Parser;
 use clap_verbosity_flag::Verbosity;
+use futures::StreamExt;
 use mpv_setup::{connect_to_mpv, create_mpv_config_file, show_grzegorz_image};
-use mpvipc_async::Mpv;
+use mpvipc_async::{Event, Mpv, MpvDataType, MpvExt};
 use std::net::{IpAddr, SocketAddr};
 use systemd_journal_logger::JournalLog;
 use tempfile::NamedTempFile;
+use tokio::task::JoinHandle;
 
 mod api;
 mod mpv_setup;
@@ -87,6 +89,66 @@ async fn setup_systemd_watchdog_thread() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn systemd_update_play_status(playing: bool, current_song: &Option<String>) {
+    sd_notify::notify(
+        false,
+        &[sd_notify::NotifyState::Status(&format!(
+            "{} {:?}",
+            if playing { "[PLAY]" } else { "[STOP]" },
+            if let Some(song) = current_song {
+                song
+            } else {
+                ""
+            }
+        ))],
+    )
+    .unwrap_or_else(|e| log::warn!("Failed to update systemd status with current song: {}", e));
+}
+
+async fn setup_systemd_notifier(mpv: Mpv) -> anyhow::Result<JoinHandle<()>> {
+    let handle = tokio::spawn(async move {
+        log::debug!("Starting systemd notifier thread");
+        let mut event_stream = mpv.get_event_stream().await;
+
+        mpv.observe_property(100, "media-title").await.unwrap();
+        mpv.observe_property(100, "pause").await.unwrap();
+
+        let mut current_song: Option<String> = mpv.get_property("media-title").await.unwrap();
+        let mut playing = !mpv.get_property("pause").await.unwrap().unwrap_or(false);
+
+        systemd_update_play_status(playing, &current_song);
+
+        loop {
+            match event_stream.next().await {
+                Some(Ok(Event::PropertyChange { name, data, .. })) => {
+                    match (name.as_str(), data) {
+                        ("media-title", Some(MpvDataType::String(s))) => {
+                            current_song = Some(s);
+                        }
+                        ("media-title", None) => {
+                            current_song = None;
+                        }
+                        ("pause", Some(MpvDataType::Bool(b))) => {
+                            playing = !b;
+                        }
+                        (event_name, _) => {
+                            log::trace!(
+                                "Received unexpected property change on systemd notifier thread: {}",
+                                event_name
+                            );
+                        }
+                    }
+
+                    systemd_update_play_status(playing, &current_song)
+                }
+                _ => {}
+            }
+        }
+    });
+
+    Ok(handle)
+}
+
 async fn shutdown(mpv: Mpv, proc: Option<tokio::process::Child>) {
     log::info!("Shutting down");
     sd_notify::notify(false, &[sd_notify::NotifyState::Stopping]).unwrap_or_else(|e| {
@@ -141,6 +203,10 @@ async fn main() -> anyhow::Result<()> {
     })
     .await
     .context("Failed to connect to mpv")?;
+
+    if systemd_mode {
+        setup_systemd_notifier(mpv.clone()).await?;
+    }
 
     if let Err(e) = show_grzegorz_image(mpv.clone()).await {
         log::warn!("Could not show Grzegorz image: {}", e);
