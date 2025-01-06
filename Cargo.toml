@@ -10,13 +10,13 @@ readme = "README.md"
 
 [dependencies]
 anyhow = "1.0.82"
-axum = { version = "0.7.7", features = ["macros"] }
+axum = { version = "0.7.7", features = ["macros", "ws"] }
 clap = { version = "4.4.1", features = ["derive"] }
 clap-verbosity-flag = "2.2.2"
 env_logger = "0.10.0"
 futures = "0.3.31"
 log = "0.4.20"
-mpvipc-async = { git = "https://git.pvv.ntnu.no/Grzegorz/mpvipc-async.git", rev = "v0.1.0" }
+mpvipc-async = { git = "https://git.pvv.ntnu.no/Grzegorz/mpvipc-async.git", branch = "main" }
 sd-notify = "0.4.3"
 serde = { version = "1.0.188", features = ["derive"] }
 serde_json = "1.0.105"

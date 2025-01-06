@@ -228,7 +228,9 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .nest("/api", api::rest_api_routes(mpv.clone()))
-        .merge(api::rest_api_docs(mpv.clone()));
+        .nest("/ws", api::websocket_api(mpv.clone()))
+        .merge(api::rest_api_docs(mpv.clone()))
+        .into_make_service_with_connect_info::<SocketAddr>();
 
     let listener = match tokio::net::TcpListener::bind(&socket_addr)
         .await
@@ -265,7 +267,7 @@ async fn main() -> anyhow::Result<()> {
                 log::info!("Received Ctrl-C, exiting");
                 shutdown(mpv, Some(proc)).await;
             }
-            result = axum::serve(listener, app.into_make_service()) => {
+            result = axum::serve(listener, app) => {
               log::info!("API server exited");
               shutdown(mpv, Some(proc)).await;
               result?;
@@ -277,7 +279,7 @@ async fn main() -> anyhow::Result<()> {
                 log::info!("Received Ctrl-C, exiting");
                 shutdown(mpv.clone(), None).await;
             }
-            result = axum::serve(listener, app.into_make_service()) => {
+            result = axum::serve(listener, app) => {
               log::info!("API server exited");
               shutdown(mpv.clone(), None).await;
               result?;
