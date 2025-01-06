@@ -1,4 +1,7 @@
-use std::net::SocketAddr;
+use std::{
+    net::SocketAddr,
+    sync::{Arc, Mutex},
+};
 
 use anyhow::Context;
 use futures::{stream::FuturesUnordered, StreamExt};
@@ -18,29 +21,45 @@ use mpvipc_async::{
     Switch,
 };
 use serde_json::{json, Value};
-use tokio::select;
+use tokio::{select, sync::watch};
 
-pub fn websocket_api(mpv: Mpv) -> Router {
+use crate::util::IdPool;
+
+#[derive(Debug, Clone)]
+struct WebsocketState {
+    mpv: Mpv,
+    id_pool: Arc<Mutex<IdPool>>,
+}
+
+pub fn websocket_api(mpv: Mpv, id_pool: Arc<Mutex<IdPool>>) -> Router {
+    let state = WebsocketState { mpv, id_pool };
     Router::new()
         .route("/", any(websocket_handler))
-        .with_state(mpv)
+        .with_state(state)
 }
 
 async fn websocket_handler(
     ws: WebSocketUpgrade,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    State(mpv): State<Mpv>,
+    State(WebsocketState { mpv, id_pool }): State<WebsocketState>,
 ) -> impl IntoResponse {
     let mpv = mpv.clone();
+    let id = match id_pool.lock().unwrap().request_id() {
+        Ok(id) => id,
+        Err(e) => {
+            log::error!("Failed to get id from id pool: {:?}", e);
+            return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
 
-    // TODO: get an id provisioned by the id pool
-    ws.on_upgrade(move |socket| handle_connection(socket, addr, mpv, 1))
+    ws.on_upgrade(move |socket| handle_connection(socket, addr, mpv, id, id_pool))
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct InitialState {
     pub cached_timestamp: Option<f64>,
     pub chapters: Vec<Value>,
+    pub connections: u64,
     pub current_percent_pos: Option<f64>,
     pub current_track: String,
     pub duration: f64,
@@ -53,7 +72,7 @@ pub struct InitialState {
     pub volume: f64,
 }
 
-async fn get_initial_state(mpv: &Mpv) -> InitialState {
+async fn get_initial_state(mpv: &Mpv, id_pool: Arc<Mutex<IdPool>>) -> InitialState {
     let cached_timestamp = mpv
         .get_property_value("demuxer-cache-state")
         .await
@@ -69,6 +88,7 @@ async fn get_initial_state(mpv: &Mpv) -> InitialState {
         Ok(Some(Value::Array(chapters))) => chapters,
         _ => vec![],
     };
+    let connections = id_pool.lock().unwrap().id_count();
     let current_percent_pos = mpv.get_property("percent-pos").await.unwrap_or(None);
     let current_track = mpv.get_file_path().await.unwrap_or("".to_string());
     let duration = mpv.get_duration().await.unwrap_or(0.0);
@@ -104,6 +124,7 @@ async fn get_initial_state(mpv: &Mpv) -> InitialState {
     InitialState {
         cached_timestamp,
         chapters,
+        connections,
         current_percent_pos,
         current_track,
         duration,
@@ -147,12 +168,18 @@ async fn setup_default_subscribes(mpv: &Mpv) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn handle_connection(mut socket: WebSocket, addr: SocketAddr, mpv: Mpv, channel_id: u64) {
+async fn handle_connection(
+    mut socket: WebSocket,
+    addr: SocketAddr,
+    mpv: Mpv,
+    channel_id: u64,
+    id_pool: Arc<Mutex<IdPool>>,
+) {
     // TODO: There is an asynchronous gap between gathering the initial state and subscribing to the properties
     //       This could lead to missing events if they happen in that gap. Send initial state, but also ensure
     //       that there is an additional "initial state" sent upon subscription to all properties to ensure that
     //       the state is correct.
-    let initial_state = get_initial_state(&mpv).await;
+    let initial_state = get_initial_state(&mpv, id_pool.clone()).await;
 
     let message = Message::Text(
         json!({
@@ -166,89 +193,17 @@ async fn handle_connection(mut socket: WebSocket, addr: SocketAddr, mpv: Mpv, ch
 
     setup_default_subscribes(&mpv).await.unwrap();
 
-    let connection_loop_mpv = mpv.clone();
-    let connection_loop = tokio::spawn(async move {
-        let mut event_stream = connection_loop_mpv.get_event_stream().await;
-        loop {
-            select! {
-              message = socket.recv() => {
-                  log::trace!("Received command from {:?}: {:?}", addr, message);
+    let id_count_watch_receiver = id_pool.lock().unwrap().get_id_count_watch_receiver();
 
-                  let ws_message_content = message
-                  .ok_or(anyhow::anyhow!("Event stream ended for {:?}", addr))
-                  .and_then(|message| {
-                    match message {
-                      Ok(message) => Ok(message),
-                      err => Err(anyhow::anyhow!("Error reading message for {:?}: {:?}", addr, err)),
-                    }
-                  })?;
+    let connection_loop_result = tokio::spawn(connection_loop(
+        socket,
+        addr,
+        mpv.clone(),
+        channel_id,
+        id_count_watch_receiver,
+    ));
 
-                  if let Message::Close(_) = ws_message_content {
-                    log::trace!("Closing connection for {:?}", addr);
-                    return Ok(());
-                  }
-
-                  if let Message::Ping(xs) = ws_message_content {
-                    log::trace!("Ponging {:?} with {:?}", addr, xs);
-                    socket.send(Message::Pong(xs)).await?;
-                    continue;
-                  }
-
-                  let message_content = match ws_message_content {
-                      Message::Text(text) => text,
-                      m => anyhow::bail!("Unexpected message type: {:?}", m),
-                  };
-
-                  let message_json = match serde_json::from_str::<Value>(&message_content) {
-                      Ok(json) => json,
-                      Err(e) => anyhow::bail!("Error parsing message from {:?}: {:?}", addr, e),
-                  };
-
-                  log::trace!("Handling command from {:?}: {:?}", addr, message_json);
-
-                  // TODO: handle errors
-                  match handle_message(message_json, connection_loop_mpv.clone(), channel_id).await {
-                    Ok(Some(response)) => {
-                      log::trace!("Handled command from {:?} successfully, sending response", addr);
-                      let message = Message::Text(json!({
-                        "type": "response",
-                        "value": response,
-                      }).to_string());
-                      socket.send(message).await?;
-                    }
-                    Ok(None) => {
-                      log::trace!("Handled command from {:?} successfully", addr);
-                    }
-                    Err(e) => {
-                      log::error!("Error handling message from {:?}: {:?}", addr, e);
-                    }
-                  }
-              }
-              event = event_stream.next() => {
-                match event {
-                  Some(Ok(event)) => {
-                    log::trace!("Sending event to {:?}: {:?}", addr, event);
-                    let message = Message::Text(json!({
-                      "type": "event",
-                      "value": event,
-                    }).to_string());
-                    socket.send(message).await?;
-                  }
-                  Some(Err(e)) => {
-                    log::error!("Error reading event stream for {:?}: {:?}", addr, e);
-                    anyhow::bail!("Error reading event stream for {:?}: {:?}", addr, e);
-                  }
-                  None => {
-                    log::trace!("Event stream ended for {:?}", addr);
-                    return Ok(());
-                  }
-                }
-              }
-            }
-        }
-    });
-
-    match connection_loop.await {
+    match connection_loop_result.await {
         Ok(Ok(())) => {
             log::trace!("Connection loop ended for {:?}", addr);
         }
@@ -272,6 +227,114 @@ async fn handle_connection(mut socket: WebSocket, addr: SocketAddr, mpv: Mpv, ch
             );
         }
     }
+
+    match id_pool.lock().unwrap().release_id(channel_id) {
+        Ok(()) => {
+            log::trace!("Released id {} for {:?}", channel_id, addr);
+        }
+        Err(e) => {
+            log::error!("Error releasing id {} for {:?}: {:?}", channel_id, addr, e);
+        }
+    }
+}
+
+async fn connection_loop(
+    mut socket: WebSocket,
+    addr: SocketAddr,
+    mpv: Mpv,
+    channel_id: u64,
+    mut id_count_watch_receiver: watch::Receiver<u64>,
+) -> Result<(), anyhow::Error> {
+    let mut event_stream = mpv.get_event_stream().await;
+    loop {
+        select! {
+          id_count = id_count_watch_receiver.changed() => {
+            if let Err(e) = id_count {
+              anyhow::bail!("Error reading id count watch receiver for {:?}: {:?}", addr, e);
+            }
+
+            let message = Message::Text(json!({
+              "type": "connection_count",
+              "value": id_count_watch_receiver.borrow().clone(),
+            }).to_string());
+
+            socket.send(message).await?;
+          }
+          message = socket.recv() => {
+              log::trace!("Received command from {:?}: {:?}", addr, message);
+
+              let ws_message_content = message
+              .ok_or(anyhow::anyhow!("Event stream ended for {:?}", addr))
+              .and_then(|message| {
+                match message {
+                  Ok(message) => Ok(message),
+                  err => Err(anyhow::anyhow!("Error reading message for {:?}: {:?}", addr, err)),
+                }
+              })?;
+
+              if let Message::Close(_) = ws_message_content {
+                log::trace!("Closing connection for {:?}", addr);
+                return Ok(());
+              }
+
+              if let Message::Ping(xs) = ws_message_content {
+                log::trace!("Ponging {:?} with {:?}", addr, xs);
+                socket.send(Message::Pong(xs)).await?;
+                continue;
+              }
+
+              let message_content = match ws_message_content {
+                  Message::Text(text) => text,
+                  m => anyhow::bail!("Unexpected message type: {:?}", m),
+              };
+
+              let message_json = match serde_json::from_str::<Value>(&message_content) {
+                  Ok(json) => json,
+                  Err(e) => anyhow::bail!("Error parsing message from {:?}: {:?}", addr, e),
+              };
+
+              log::trace!("Handling command from {:?}: {:?}", addr, message_json);
+
+              // TODO: handle errors
+              match handle_message(message_json, mpv.clone(), channel_id).await {
+                Ok(Some(response)) => {
+                  log::trace!("Handled command from {:?} successfully, sending response", addr);
+                  let message = Message::Text(json!({
+                    "type": "response",
+                    "value": response,
+                  }).to_string());
+                  socket.send(message).await?;
+                }
+                Ok(None) => {
+                  log::trace!("Handled command from {:?} successfully", addr);
+                }
+                Err(e) => {
+                  log::error!("Error handling message from {:?}: {:?}", addr, e);
+                }
+              }
+          }
+          event = event_stream.next() => {
+            match event {
+              Some(Ok(event)) => {
+                log::trace!("Sending event to {:?}: {:?}", addr, event);
+                let message = Message::Text(json!({
+                  "type": "event",
+                  "value": event,
+                }).to_string());
+                socket.send(message).await?;
+              }
+              Some(Err(e)) => {
+                log::error!("Error reading event stream for {:?}: {:?}", addr, e);
+                anyhow::bail!("Error reading event stream for {:?}: {:?}", addr, e);
+              }
+              None => {
+                log::trace!("Event stream ended for {:?}", addr);
+                return Ok(());
+              }
+            }
+          }
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -279,7 +342,6 @@ async fn handle_connection(mut socket: WebSocket, addr: SocketAddr, mpv: Mpv, ch
 pub enum WSCommand {
     // Subscribe { property: String },
     // UnsubscribeAll,
-
     Load { urls: Vec<String> },
     TogglePlayback,
     Volume { volume: f64 },

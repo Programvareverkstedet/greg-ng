@@ -5,13 +5,18 @@ use clap_verbosity_flag::Verbosity;
 use futures::StreamExt;
 use mpv_setup::{connect_to_mpv, create_mpv_config_file, show_grzegorz_image};
 use mpvipc_async::{Event, Mpv, MpvDataType, MpvExt};
-use std::net::{IpAddr, SocketAddr};
+use std::{
+    net::{IpAddr, SocketAddr},
+    sync::{Arc, Mutex},
+};
 use systemd_journal_logger::JournalLog;
 use tempfile::NamedTempFile;
 use tokio::task::JoinHandle;
+use util::IdPool;
 
 mod api;
 mod mpv_setup;
+mod util;
 
 #[derive(Parser)]
 struct Args {
@@ -119,29 +124,26 @@ async fn setup_systemd_notifier(mpv: Mpv) -> anyhow::Result<JoinHandle<()>> {
         systemd_update_play_status(playing, &current_song);
 
         loop {
-            match event_stream.next().await {
-                Some(Ok(Event::PropertyChange { name, data, .. })) => {
-                    match (name.as_str(), data) {
-                        ("media-title", Some(MpvDataType::String(s))) => {
-                            current_song = Some(s);
-                        }
-                        ("media-title", None) => {
-                            current_song = None;
-                        }
-                        ("pause", Some(MpvDataType::Bool(b))) => {
-                            playing = !b;
-                        }
-                        (event_name, _) => {
-                            log::trace!(
-                                "Received unexpected property change on systemd notifier thread: {}",
-                                event_name
-                            );
-                        }
+            if let Some(Ok(Event::PropertyChange { name, data, .. })) = event_stream.next().await {
+                match (name.as_str(), data) {
+                    ("media-title", Some(MpvDataType::String(s))) => {
+                        current_song = Some(s);
                     }
-
-                    systemd_update_play_status(playing, &current_song)
+                    ("media-title", None) => {
+                        current_song = None;
+                    }
+                    ("pause", Some(MpvDataType::Bool(b))) => {
+                        playing = !b;
+                    }
+                    (event_name, _) => {
+                        log::trace!(
+                            "Received unexpected property change on systemd notifier thread: {}",
+                            event_name
+                        );
+                    }
                 }
-                _ => {}
+
+                systemd_update_play_status(playing, &current_song)
             }
         }
     });
@@ -226,9 +228,11 @@ async fn main() -> anyhow::Result<()> {
     let socket_addr = SocketAddr::new(addr, args.port);
     log::info!("Starting API on {}", socket_addr);
 
+    let id_pool = Arc::new(Mutex::new(IdPool::new_with_max_limit(1024)));
+
     let app = Router::new()
         .nest("/api", api::rest_api_routes(mpv.clone()))
-        .nest("/ws", api::websocket_api(mpv.clone()))
+        .nest("/ws", api::websocket_api(mpv.clone(), id_pool.clone()))
         .merge(api::rest_api_docs(mpv.clone()))
         .into_make_service_with_connect_info::<SocketAddr>();
 
