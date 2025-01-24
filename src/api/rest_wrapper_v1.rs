@@ -32,6 +32,7 @@ pub fn rest_api_routes(mpv: Mpv) -> Router {
         .route("/playlist/shuffle", post(shuffle))
         .route("/playlist/loop", get(playlist_get_looping))
         .route("/playlist/loop", post(playlist_set_looping))
+        .route("/sway/command", post(sway_command))
         .with_state(mpv)
 }
 
@@ -400,4 +401,24 @@ async fn playlist_set_looping(
     Query(query): Query<PlaylistSetLoopingArgs>,
 ) -> RestResponse {
     base::playlist_set_looping(mpv, query.r#loop).await.into()
+}
+
+
+#[derive(serde::Deserialize, utoipa::IntoParams)]
+struct SwayCommandArgs {
+    command: String,
+}
+
+/// Execute a sway command
+#[utoipa::path(
+    post,
+    path = "/sway/command",
+    params(SwayCommandArgs),
+    responses(
+        (status = 200, description = "Success", body = EmptySuccessResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse),
+    )
+)]
+async fn sway_command(Query(query): Query<SwayCommandArgs>) -> RestResponse {
+    base::run_sway_command(query.command).await.map_err(anyhow::Error::new).into()
 }

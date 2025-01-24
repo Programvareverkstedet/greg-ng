@@ -25,6 +25,8 @@ use tokio::{select, sync::watch};
 
 use crate::util::IdPool;
 
+use super::base;
+
 #[derive(Debug, Clone)]
 struct WebsocketState {
     mpv: Mpv,
@@ -355,6 +357,7 @@ pub enum WSCommand {
     Shuffle,
     SetSubtitleTrack { track: Option<usize> },
     SetLooping { value: bool },
+    SwayCommand { command: String },
 }
 
 async fn handle_message(
@@ -443,6 +446,10 @@ async fn handle_message(
         WSCommand::SetLooping { value } => {
             mpv.set_loop_playlist(if value { Switch::On } else { Switch::Off })
                 .await?;
+            Ok(None)
+        }
+        WSCommand::SwayCommand { command } => {
+            base::run_sway_command(command).await?;
             Ok(None)
         }
     }

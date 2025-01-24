@@ -170,3 +170,15 @@ pub async fn playlist_set_looping(mpv: Mpv, r#loop: bool) -> anyhow::Result<()> 
         .await
         .map_err(|e| e.into())
 }
+
+use swayipc::{Connection, Fallible};
+
+pub async fn run_sway_command(command: String) -> Fallible<()> {
+    tokio::task::spawn_blocking(move || -> Fallible<()> {
+        let mut connection = Connection::new()?;
+        connection.run_command(&command)?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| swayipc::Error::CommandFailed(e.to_string()))?
+}

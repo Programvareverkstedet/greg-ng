@@ -11,6 +11,8 @@ in
     mpvPackage = lib.mkPackageOption pkgs "mpv" { };
 
     enableSway = lib.mkEnableOption "sway as the main window manager";
+    
+    enableFirefox = lib.mkEnableOption "include fiorefox browser for external urls";
 
     enablePipewire = lib.mkEnableOption "pipewire" // { default = true; };
 
@@ -166,6 +168,14 @@ in
         wrapperFeatures.gtk = true;
       };
 
+    (lib.mkIf (cfg.enable && cfg.enableFirefox) {
+      programs.firefox = {
+        enable = true;
+        preferences = {
+          media.autoplay.default = "0";
+        };
+      };
+
       xdg.portal = {
         enable = true;
         wlr.enable = true;
@@ -176,6 +186,7 @@ in
         users.greg = {
           isNormalUser = true;
           group = "greg";
+          extraGroups [ "audio" "video" "input" ];
           uid = 2000;
           description = "loud gym bro";
         };
