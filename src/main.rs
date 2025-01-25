@@ -231,9 +231,11 @@ async fn main() -> anyhow::Result<()> {
     let id_pool = Arc::new(Mutex::new(IdPool::new_with_max_limit(1024)));
 
     let app = Router::new()
-        .nest("/api", api::rest_api_routes(mpv.clone()))
+        // .nest("/api/v1", api::rest_api_routes_v1(mpv.clone()))
+        .nest("/api/v2", api::rest_api_routes_v2(mpv.clone()))
         .nest("/ws", api::websocket_api(mpv.clone(), id_pool.clone()))
-        .merge(api::rest_api_docs(mpv.clone()))
+        // .merge(api::rest_api_docs_v1(mpv.clone()))
+        .merge(api::rest_api_docs_v2(mpv.clone()))
         .into_make_service_with_connect_info::<SocketAddr>();
 
     let listener = match tokio::net::TcpListener::bind(&socket_addr)

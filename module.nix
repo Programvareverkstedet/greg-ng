@@ -168,13 +168,15 @@ in
         wrapperFeatures.gtk = true;
       };
 
-    (lib.mkIf (cfg.enable && cfg.enableFirefox) {
-      programs.firefox = {
-        enable = true;
-        preferences = {
-          media.autoplay.default = "0";
+      (lib.mkIf (cfg.enableFirefox) {
+        programs.firefox = {
+          enable = true;
+          preferences = {
+              media.autoplay.default = "0";
+          };
         };
-      };
+        environment.sessionVariables.DEFAULT_BROWSER = "${pkgs.firefox}/bin/firefox";
+      })
 
       xdg.portal = {
         enable = true;

@@ -173,7 +173,7 @@ pub async fn playlist_set_looping(mpv: Mpv, r#loop: bool) -> anyhow::Result<()> 
 
 use swayipc::{Connection, Fallible};
 
-pub async fn run_sway_command(command: String) -> Fallible<()> {
+pub async fn sway_run_command(command: String) -> Fallible<()> {
     tokio::task::spawn_blocking(move || -> Fallible<()> {
         let mut connection = Connection::new()?;
         connection.run_command(&command)?;
@@ -182,3 +182,98 @@ pub async fn run_sway_command(command: String) -> Fallible<()> {
     .await
     .map_err(|e| swayipc::Error::CommandFailed(e.to_string()))?
 }
+
+
+//only to check if workspace exists.
+fn get_workspace_names(connection: &mut Connection) -> Fallible<Vec<String>> {
+    let workspaces = connection.get_workspaces()?;
+    Ok(workspaces.iter().map(|w| w.name.clone()).collect())
+}
+
+pub async fn sway_get_workspace_names() -> Fallible<Vec<String>> {
+    tokio::task::spawn_blocking(|| -> Fallible<Vec<String>> {
+        let mut connection = Connection::new()?;
+        get_workspace_names(&mut connection)
+    })
+    .await
+    .map_err(|e| swayipc::Error::CommandFailed(e.to_string()))?
+}
+
+fn is_valid_workspace(workspace: &str, connection: &mut Connection) -> Fallible<bool> {
+    let workspace_names = get_workspace_names(connection)?;
+    Ok(workspace_names.contains(&workspace.to_string()) || 
+        workspace.parse::<u32>()
+            .map(|num| num >= 1 && num <= 10)
+            .unwrap_or(false))
+}
+
+pub async fn sway_change_workspace(workspace: String) -> Fallible<()> {
+    tokio::task::spawn_blocking(move || -> Fallible<()> {
+        let mut connection = Connection::new()?;
+        
+        if !is_valid_workspace(&workspace, &mut connection)? {
+            return Err(swayipc::Error::CommandFailed(
+                "Invalid workspace name. Must be existing workspace or number 1-10".to_string()
+            ));
+        }
+
+        connection.run_command(&format!("workspace {}", workspace))?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| swayipc::Error::CommandFailed(e.to_string()))?
+}
+
+use url::Url;
+pub async fn sway_launch_browser(url: &str) -> Fallible<()> {
+    // Validate URL
+    let url = Url::parse(url)
+        .map_err(|e| swayipc::Error::CommandFailed(format!("Invalid URL: {}", e)))?;
+    
+    // Ensure URL scheme is http or https
+    if url.scheme() != "http" && url.scheme() != "https" {
+        return Err(swayipc::Error::CommandFailed("URL must use http or https protocol".into()));
+    }
+
+    tokio::task::spawn_blocking(move || -> Fallible<()> {
+        let mut connection = Connection::new()?;
+        connection.run_command(&format!("exec xdg-open {}", url))?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| swayipc::Error::CommandFailed(e.to_string()))?
+}
+
+pub async fn sway_close_workspace(workspace: String) -> Fallible<()> {
+    tokio::task::spawn_blocking(move || -> Fallible<()> {
+        let mut connection = Connection::new()?;
+        
+        // Validate workspace exists
+        if !is_valid_workspace(&workspace, &mut connection)? {
+            return Err(swayipc::Error::CommandFailed(
+                "Invalid workspace name".to_string()
+            ));
+        }
+
+        // Get workspace tree and find all nodes in target workspace
+        let tree = connection.get_tree()?;
+        let workspace_nodes = tree
+            .nodes
+            .iter()
+            .flat_map(|output| &output.nodes)  // Get workspaces
+            .find(|ws| ws.name.as_ref().map_or(false, |name| name == &workspace));
+
+        // Kill all nodes in workspace if found
+        if let Some(ws) = workspace_nodes {
+            for container in ws.nodes.iter() {
+                // Close each container in the workspace
+                connection.run_command(&format!("[con_id={}] kill", container.id))?;
+            }
+        }
+
+        Ok(())
+    })
+    .await
+    .map_err(|e| swayipc::Error::CommandFailed(e.to_string()))?
+}
+

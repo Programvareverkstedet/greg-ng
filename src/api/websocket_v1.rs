@@ -449,7 +449,7 @@ async fn handle_message(
             Ok(None)
         }
         WSCommand::SwayCommand { command } => {
-            base::run_sway_command(command).await?;
+            base::sway_run_command(command).await?;
             Ok(None)
         }
     }

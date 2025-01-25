@@ -9,6 +9,7 @@ readme = "README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+url = "2.2.2"
 swayipc = "3.0"
 anyhow = "1.0.82"
 axum = { version = "0.7.7", features = ["macros", "ws"] }
