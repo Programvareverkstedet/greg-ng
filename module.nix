@@ -13,6 +13,8 @@ in
     enableSway = lib.mkEnableOption "sway as the main window manager";
     
     enableFirefox = lib.mkEnableOption "include fiorefox browser for external urls";
+    
+    enableInput = lib.mkEnableOption "enable input maipulation with ydotool,";
 
     enablePipewire = lib.mkEnableOption "pipewire" // { default = true; };
 
@@ -162,6 +164,11 @@ in
         pulse.enable = true;
       };
     })
+    (lib.mkIf (cfg.enable && cfg.enableInput) {
+        programs.ydotool = {
+          enable = true;
+        };
+    })
     (lib.mkIf (cfg.enable && cfg.enableSway) {
       programs.sway = {
         enable = true;
@@ -188,7 +195,7 @@ in
         users.greg = {
           isNormalUser = true;
           group = "greg";
-          extraGroups [ "audio" "video" "input" ];
+          extraGroups [ "audio" "video" "input" "ydotool" ];
           uid = 2000;
           description = "loud gym bro";
         };

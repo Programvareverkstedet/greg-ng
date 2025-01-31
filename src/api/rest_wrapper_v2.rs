@@ -11,6 +11,7 @@ use serde_json::{json, Value};
 use utoipa::OpenApi;
 use utoipa_axum::{router::OpenApiRouter, routes};
 use utoipa_swagger_ui::SwaggerUi;
+use futures::FutureExt;
 
 use super::base;
 
@@ -32,11 +33,14 @@ pub fn rest_api_routes(mpv: Mpv) -> Router {
         .route("/playlist/shuffle", post(shuffle))
         .route("/playlist/loop", get(playlist_get_looping))
         .route("/playlist/loop", post(playlist_set_looping))
-        .route("/sway/command", post(sway_run_command))
+        // .route("/sway/command", post(sway_run_command))
         .route("/sway/workspace/close", post(sway_close_workspace_handler))
         .route("/sway/workspace/change", post(sway_change_workspace_handler))
         .route("/sway/workspace/list", get(sway_get_workspace_names_handler))
         .route("/sway/browser/launch", post(sway_launch_browser_handler))
+        .route("/sway/input/keys", post(sway_input_handler))
+        .route("/sway/input/mouse", post(sway_mouse_move_handler))
+        .route("/sway/input/scroll", post(sway_mouse_scroll_handler))
         .with_state(mpv)
 }
 
@@ -408,72 +412,71 @@ async fn playlist_set_looping(
 }
 
 
-/// Execute a sway command  TODO: restrict to switching workspace, etc instead of arbitrary commands
-#[derive(serde::Deserialize, utoipa::IntoParams)]
-struct SwayCommandArgs {
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+struct SwayCommandBody {
     command: String,
 }
-#[utoipa::path(
-    post,
-    path = "/sway/command",
-    params(SwayCommandArgs),
-    responses(
-        (status = 200, description = "Success", body = EmptySuccessResponse),
-        (status = 500, description = "Internal server error", body = ErrorResponse),
-    )
-)]
-async fn sway_run_command(Query(query): Query<SwayCommandArgs>) -> RestResponse {
-    base::sway_run_command(query.command).await.map_err(anyhow::Error::new).into()
-}
 
+// #[utoipa::path(
+//     post,
+//     path = "/sway/command",
+//     request_body = SwayCommandBody,
+//     responses(
+//         (status = 200, description = "Success", body = EmptySuccessResponse),
+//         (status = 500, description = "Internal server error", body = ErrorResponse),
+//     )
+// )]
+// async fn sway_run_command(Json(body): Json<SwayCommandBody>) -> RestResponse {
+//     base::sway_run_command(body.command).await.map_err(anyhow::Error::new).into()
+// }
 
-#[derive(serde::Deserialize, utoipa::IntoParams)]
-struct SwayBrowserArgs {
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+struct SwayBrowserBody {
     url: String,
 }
+
 #[utoipa::path(
     post,
-    path = "/sway/browser/launch",
-    params(SwayBrowserArgs),
+    path = "/sway/browser/launch", 
+    request_body = SwayBrowserBody,
     responses(
         (status = 200, description = "Success", body = EmptySuccessResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse),
     )
 )]
-async fn sway_launch_browser_handler(Query(query): Query<SwayBrowserArgs>) -> RestResponse {
-    base::sway_launch_browser(&query.url).await.map_err(anyhow::Error::new).into()
+async fn sway_launch_browser_handler(Json(body): Json<SwayBrowserBody>) -> RestResponse {
+    base::sway_launch_browser(&body.url).await.map_err(anyhow::Error::new).into()
 }
 
-#[derive(serde::Deserialize, utoipa::IntoParams)]
-struct SwayWorkspaceArgs {
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+struct SwayWorkspaceBody {
     workspace: String,
 }
-
 
 #[utoipa::path(
     post,
     path = "/sway/workspace/close",
-    params(SwayWorkspaceArgs),
+    request_body = SwayWorkspaceBody,
     responses(
         (status = 200, description = "Success", body = EmptySuccessResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse),
     )
 )]
-async fn sway_close_workspace_handler(Query(query): Query<SwayWorkspaceArgs>) -> RestResponse {
-    base::sway_close_workspace(query.workspace).await.map_err(anyhow::Error::new).into()
+async fn sway_close_workspace_handler(Json(body): Json<SwayWorkspaceBody>) -> RestResponse {
+    base::sway_close_workspace(body.workspace).await.map_err(anyhow::Error::new).into()
 }
 
 #[utoipa::path(
     post,
-    path = "/sway/workspace/change",  
-    params(SwayWorkspaceArgs),
+    path = "/sway/workspace/change",
+    request_body = SwayWorkspaceBody, 
     responses(
         (status = 200, description = "Success", body = EmptySuccessResponse),
         (status = 500, description = "Internal server error", body = ErrorResponse),
     )
 )]
-async fn sway_change_workspace_handler(Query(query): Query<SwayWorkspaceArgs>) -> RestResponse {
-    base::sway_change_workspace(query.workspace).await.map_err(anyhow::Error::new).into()
+async fn sway_change_workspace_handler(Json(body): Json<SwayWorkspaceBody>) -> RestResponse {
+    base::sway_change_workspace(body.workspace).await.map_err(anyhow::Error::new).into()
 }
 
 #[utoipa::path(
@@ -491,3 +494,78 @@ async fn sway_get_workspace_names_handler() -> RestResponse {
         .into()
 }
 
+
+
+
+
+
+
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+struct KeyboardInput {
+    keys: String,
+}
+
+
+#[utoipa::path(
+    post,
+    path = "/sway/input/keys",
+    request_body = KeyboardInput,
+    responses(
+        (status = 200, description = "Success", body = Vec<String>),
+        (status = 500, description = "Internal server error", body = ErrorResponse),
+    )
+)]
+async fn sway_input_handler(
+    Json(payload): Json<KeyboardInput>
+) -> RestResponse {
+    base::sway_input(payload.keys)
+        .await
+        .map(|_| json!({}))
+        .map_err(anyhow::Error::new)
+        .into()
+}
+
+#[utoipa::path(
+    post,
+    path = "/sway/input/mouse",
+    request_body = MouseMove,
+    responses(
+        (status = 200, description = "Success", body = Vec<String>),
+        (status = 500, description = "Internal server error", body = ErrorResponse),
+    )
+)]
+async fn sway_mouse_move_handler(
+    Json(payload): Json<MouseMove>
+) -> RestResponse {
+    base::sway_mouse_move(payload.x, payload.y)
+        .await
+        .map(|_| json!({}))
+        .map_err(anyhow::Error::new)
+        .into()
+}
+
+#[utoipa::path(
+    post,
+    path = "/sway/input/scroll",
+    request_body = MouseMove,
+    responses(
+        (status = 200, description = "Success", body = Vec<String>),
+        (status = 500, description = "Internal server error", body = ErrorResponse),
+    )
+)]
+async fn sway_mouse_scroll_handler(
+    Json(payload): Json<MouseMove>
+) -> RestResponse {
+    base::sway_mouse_scroll(payload.x, payload.y)
+        .await
+        .map(|_| json!({}))
+        .map_err(anyhow::Error::new)
+        .into()
+}
+
+
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+struct MouseMove {
+    x: i32,
+    y: i32,
+}

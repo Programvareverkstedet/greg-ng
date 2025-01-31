@@ -357,7 +357,11 @@ pub enum WSCommand {
     Shuffle,
     SetSubtitleTrack { track: Option<usize> },
     SetLooping { value: bool },
-    SwayCommand { command: String },
+    // SwayCommand { command: String },
+    SwayLaunchBrowser { url: String },
+    SwayCloseWorkspace { workspace: String },
+    SwayChangeWorkspace { workspace: String },
+    SwayGetWorkspaces,
 }
 
 async fn handle_message(
@@ -448,9 +452,25 @@ async fn handle_message(
                 .await?;
             Ok(None)
         }
-        WSCommand::SwayCommand { command } => {
-            base::sway_run_command(command).await?;
+        // WSCommand::SwayCommand { command } => {
+        //     base::sway_run_command(command).await?;
+        //     Ok(None)
+        // }
+        WSCommand::SwayLaunchBrowser { url } => {
+            base::sway_launch_browser(&url).await?;
             Ok(None)
+        }
+        WSCommand::SwayCloseWorkspace { workspace } => {
+            base::sway_close_workspace(workspace).await?;
+            Ok(None)
+        }
+        WSCommand::SwayChangeWorkspace { workspace } => {
+            base::sway_change_workspace(workspace).await?;
+            Ok(None)
+        }
+        WSCommand::SwayGetWorkspaces => {
+            let workspaces = base::sway_get_workspace_names().await?;
+            Ok(Some(json!(workspaces)))
         }
     }
 }
