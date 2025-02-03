@@ -238,17 +238,11 @@ pub async fn sway_launch_browser(url: &str) -> Fallible<()> {
     tokio::task::spawn_blocking(move || -> Fallible<()> {
         let mut connection = Connection::new()?;
         // connection.run_command(&format!("exec xdg-open {}", url))?;
-        connection.run_command(&format!("exec firefox --kiosk {}", url))?; //moved to firefox to pin in kiosk mode. potentially add --new-window
+        // connection.run_command(&format!("exec firefox --kiosk {}", url))?; //moved to firefox to pin in kiosk mode. potentially add --new-window
 
-        // let browser_output = std::process::Command::new("xdg-settings")
-        //     .arg("get")
-        //     .arg("default-web-browser")
-        //     .output()?;
-        // let default_browser = String::from_utf8(browser_output.stdout)?
-        //     .trim()
-        //     .trim_end_matches(".desktop")
-        //     .to_string();
-        // connection.run_command(&format!("exec {} --kiosk {}", default_browser, url))?; // set default browser in kiosk mode
+        //get the DEFAULT_BROWSER env var
+        let default_browser = std::env::var("DEFAULT_BROWSER").unwrap_or("firefox".to_string());
+        connection.run_command(&format!("exec {} --kiosk {}", default_browser, url))?; // set default browser in kiosk mode
         
         Ok(())
     })
@@ -335,12 +329,13 @@ fn validate_keypress_string(input: &str) -> Fallible<String> {
 }
 
 //to simulate keypresses 42:1 38:1 38:0 24:1 24:0 38:1 38:0 42:0 -> LOL
-pub async fn sway_input(keys: String) -> Fallible<()> {
+pub async fn input(keys: String) -> Fallible<()> {
     let validated_input = validate_keypress_string(&keys)?;
     
     tokio::task::spawn_blocking(move || -> Fallible<()> {
         let mut connection = Connection::new()?;
         connection.run_command(&format!("exec ydotool key {}", validated_input))?;
+        // instead of running through swaycmf
         Ok(())
     })
     .await
@@ -348,7 +343,7 @@ pub async fn sway_input(keys: String) -> Fallible<()> {
 }
 
 // simulate mouse movement
-pub async fn sway_mouse_move(x: i32, y: i32) -> Fallible<()> {
+pub async fn mouse_move(x: i32, y: i32) -> Fallible<()> {
     tokio::task::spawn_blocking(move || -> Fallible<()> {
         let mut connection = Connection::new()?;
         connection.run_command(&format!("exec ydotool mousemove  -x {} -y {}", x, y))?;
@@ -360,7 +355,7 @@ pub async fn sway_mouse_move(x: i32, y: i32) -> Fallible<()> {
 
 
 //simulate scroll
-pub async fn sway_mouse_scroll(x: i32, y: i32) -> Fallible<()> {
+pub async fn mouse_scroll(x: i32, y: i32) -> Fallible<()> {
     tokio::task::spawn_blocking(move || -> Fallible<()> {
         let mut connection = Connection::new()?;
         connection.run_command(&format!("exec ydotool mousemove -w  -x {} -y {}", x, y))?;
@@ -413,7 +408,7 @@ impl MouseButton {
     }
 }
 
-pub async fn sway_mouse_click(button: String) -> Fallible<()> {
+pub async fn mouse_click(button: String) -> Fallible<()> {
     let mouse_button = MouseButton::from_str(&button)?;
     let click_value = mouse_button.click_value();
     

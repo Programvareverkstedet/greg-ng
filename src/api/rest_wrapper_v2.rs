@@ -38,9 +38,10 @@ pub fn rest_api_routes(mpv: Mpv) -> Router {
         .route("/sway/workspace/change", post(sway_change_workspace_handler))
         .route("/sway/workspace/list", get(sway_get_workspace_names_handler))
         .route("/sway/browser/launch", post(sway_launch_browser_handler))
-        .route("/sway/input/keys", post(sway_input_handler))
-        .route("/sway/input/mouse", post(sway_mouse_move_handler))
-        .route("/sway/input/scroll", post(sway_mouse_scroll_handler))
+        .route("/input/keys", post(input_handler))
+        .route("/input/mouse", post(mouse_move_handler))
+        .route("/input/scroll", post(mouse_scroll_handler))
+        .route("/input/click", post(mouse_click_handler))
         .with_state(mpv)
 }
 
@@ -497,9 +498,6 @@ async fn sway_get_workspace_names_handler() -> RestResponse {
 
 
 
-
-
-
 #[derive(serde::Deserialize, utoipa::ToSchema)]
 struct KeyboardInput {
     keys: String,
@@ -508,64 +506,90 @@ struct KeyboardInput {
 
 #[utoipa::path(
     post,
-    path = "/sway/input/keys",
+    path = "/input/keys",
     request_body = KeyboardInput,
     responses(
         (status = 200, description = "Success", body = Vec<String>),
         (status = 500, description = "Internal server error", body = ErrorResponse),
     )
 )]
-async fn sway_input_handler(
+async fn input_handler(
     Json(payload): Json<KeyboardInput>
 ) -> RestResponse {
-    base::sway_input(payload.keys)
+    base::input(payload.keys)
         .await
         .map(|_| json!({}))
         .map_err(anyhow::Error::new)
         .into()
 }
 
-#[utoipa::path(
-    post,
-    path = "/sway/input/mouse",
-    request_body = MouseMove,
-    responses(
-        (status = 200, description = "Success", body = Vec<String>),
-        (status = 500, description = "Internal server error", body = ErrorResponse),
-    )
-)]
-async fn sway_mouse_move_handler(
-    Json(payload): Json<MouseMove>
-) -> RestResponse {
-    base::sway_mouse_move(payload.x, payload.y)
-        .await
-        .map(|_| json!({}))
-        .map_err(anyhow::Error::new)
-        .into()
-}
-
-#[utoipa::path(
-    post,
-    path = "/sway/input/scroll",
-    request_body = MouseMove,
-    responses(
-        (status = 200, description = "Success", body = Vec<String>),
-        (status = 500, description = "Internal server error", body = ErrorResponse),
-    )
-)]
-async fn sway_mouse_scroll_handler(
-    Json(payload): Json<MouseMove>
-) -> RestResponse {
-    base::sway_mouse_scroll(payload.x, payload.y)
-        .await
-        .map(|_| json!({}))
-        .map_err(anyhow::Error::new)
-        .into()
-}
 
 
 #[derive(serde::Deserialize, utoipa::ToSchema)]
 struct MouseMove {
     x: i32,
     y: i32,
+}
+
+#[utoipa::path(
+    post,
+    path = "/input/mouse",
+    request_body = MouseMove,
+    responses(
+        (status = 200, description = "Success", body = Vec<String>),
+        (status = 500, description = "Internal server error", body = ErrorResponse),
+    )
+)]
+async fn mouse_move_handler(
+    Json(payload): Json<MouseMove>
+) -> RestResponse {
+    base::mouse_move(payload.x, payload.y)
+        .await
+        .map(|_| json!({}))
+        .map_err(anyhow::Error::new)
+        .into()
+}
+
+#[utoipa::path(
+    post,
+    path = "/input/scroll",
+    request_body = MouseMove,
+    responses(
+        (status = 200, description = "Success", body = Vec<String>),
+        (status = 500, description = "Internal server error", body = ErrorResponse),
+    )
+)]
+async fn mouse_scroll_handler(
+    Json(payload): Json<MouseMove>
+) -> RestResponse {
+    base::mouse_scroll(payload.x, payload.y)
+        .await
+        .map(|_| json!({}))
+        .map_err(anyhow::Error::new)
+        .into()
+}
+
+//click
+#[derive(serde::Deserialize, utoipa::ToSchema)]
+struct MouseClick {
+    button: String
+}
+
+#[utoipa::path(
+    post,
+    path = "/input/click",
+    request_body = MouseClick,
+    responses(
+        (status = 200, description = "Success", body = Vec<String>),
+        (status = 500, description = "Internal server error", body = ErrorResponse),
+    )
+)]
+async fn mouse_click_handler(
+    Json(payload): Json<MouseClick>
+) -> RestResponse {
+    base::mouse_click(payload.button)
+        .await
+        .map(|_| json!({}))
+        .map_err(anyhow::Error::new)
+        .into()
 }
