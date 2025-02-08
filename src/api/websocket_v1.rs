@@ -362,6 +362,11 @@ pub enum WSCommand {
     SwayCloseWorkspace { workspace: String },
     SwayChangeWorkspace { workspace: String },
     SwayGetWorkspaces,
+    // New input commands
+    InputKeys { keys: String },
+    MouseMove { x: i32, y: i32 },
+    MouseScroll { x: i32, y: i32 },
+    MouseClick { button: String },
 }
 
 async fn handle_message(
@@ -471,6 +476,34 @@ async fn handle_message(
         WSCommand::SwayGetWorkspaces => {
             let workspaces = base::sway_get_workspace_names().await?;
             Ok(Some(json!(workspaces)))
+        }
+        WSCommand::InputKeys { keys } => {
+            base::input(keys)
+                .await
+                .map(|_| json!({}))
+                .map_err(anyhow::Error::new)?;
+            Ok(None)
+        }
+        WSCommand::MouseMove { x, y } => {
+            base::mouse_move(x, y)
+                .await
+                .map(|_| json!({}))
+                .map_err(anyhow::Error::new)?;
+            Ok(None)
+        }
+        WSCommand::MouseScroll { x, y } => {
+            base::mouse_scroll(x, y)
+                .await
+                .map(|_| json!({}))
+                .map_err(anyhow::Error::new)?;
+            Ok(None)
+        }
+        WSCommand::MouseClick { button } => {
+            base::mouse_click(button)
+                .await
+                .map(|_| json!({}))
+                .map_err(anyhow::Error::new)?;
+            Ok(None)
         }
     }
 }
