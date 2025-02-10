@@ -171,11 +171,9 @@ pub async fn playlist_set_looping(mpv: Mpv, r#loop: bool) -> anyhow::Result<()> 
         .map_err(|e| e.into())
 }
 
-use swayipc::{Connection, Fallible};
-
-// pub async fn sway_run_command(command: String) -> Fallible<()> {
-//     tokio::task::spawn_blocking(move || -> Fallible<()> {
-//         let mut connection = Connection::new()?;
+// pub async fn sway_run_command(command: String) -> anyhow::Result<()> {
+//     tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+//         let mut connection = swayipc::Connection::new()?;
 //         connection.run_command(&command)?;
 //         Ok(())
 //     })
@@ -184,21 +182,21 @@ use swayipc::{Connection, Fallible};
 // }
 
 //only to check if workspace exists.
-fn get_workspace_names(connection: &mut Connection) -> Fallible<Vec<String>> {
+fn get_workspace_names(connection: &mut swayipc::Connection) -> anyhow::Result<Vec<String>> {
     let workspaces = connection.get_workspaces()?;
     Ok(workspaces.iter().map(|w| w.name.clone()).collect())
 }
 
-pub async fn sway_get_workspace_names() -> Fallible<Vec<String>> {
-    tokio::task::spawn_blocking(|| -> Fallible<Vec<String>> {
-        let mut connection = Connection::new()?;
+pub async fn sway_get_workspace_names() -> anyhow::Result<Vec<String>> {
+    tokio::task::spawn_blocking(|| -> anyhow::Result<Vec<String>> {
+        let mut connection = swayipc::Connection::new()?;
         get_workspace_names(&mut connection)
     })
     .await
     .map_err(|e| swayipc::Error::CommandFailed(e.to_string()))?
 }
 
-fn is_valid_workspace(workspace: &str, connection: &mut Connection) -> Fallible<bool> {
+fn is_valid_workspace(workspace: &str, connection: &mut swayipc::Connection) -> anyhow::Result<bool> {
     let workspace_names = get_workspace_names(connection)?;
     Ok(workspace_names.contains(&workspace.to_string()) || 
         workspace.parse::<u32>()
@@ -206,14 +204,12 @@ fn is_valid_workspace(workspace: &str, connection: &mut Connection) -> Fallible<
             .unwrap_or(false))
 }
 
-pub async fn sway_change_workspace(workspace: String) -> Fallible<()> {
-    tokio::task::spawn_blocking(move || -> Fallible<()> {
-        let mut connection = Connection::new()?;
+pub async fn sway_change_workspace(workspace: String) -> anyhow::Result<()> {
+    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        let mut connection = swayipc::Connection::new()?;
         
         if !is_valid_workspace(&workspace, &mut connection)? {
-            return Err(swayipc::Error::CommandFailed(
-                "Invalid workspace name. Must be existing workspace or number 1-10".to_string()
-            ));
+            anyhow::bail!("Invalid workspace name");
         }
 
         connection.run_command(&format!("workspace {}", workspace))?;
@@ -225,18 +221,18 @@ pub async fn sway_change_workspace(workspace: String) -> Fallible<()> {
 
 use url::Url;
 
-pub async fn sway_launch_browser(url: &str) -> Fallible<()> {
+pub async fn sway_launch_browser(url: &str) -> anyhow::Result<()> {
     // Validate URL
     let url = Url::parse(url)
         .map_err(|e| swayipc::Error::CommandFailed(format!("Invalid URL: {}", e)))?;
     
     // Ensure URL scheme is http or https
     if url.scheme() != "http" && url.scheme() != "https" {
-        return Err(swayipc::Error::CommandFailed("URL must use http or https protocol".into()));
-    }
+        anyhow::bail!("URL must use http or https protocol");
+        }
 
-    tokio::task::spawn_blocking(move || -> Fallible<()> {
-        let mut connection = Connection::new()?;
+    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        let mut connection = swayipc::Connection::new()?;
         // connection.run_command(&format!("exec xdg-open {}", url))?;
         // connection.run_command(&format!("exec firefox --kiosk {}", url))?; //moved to firefox to pin in kiosk mode. potentially add --new-window
 
@@ -250,15 +246,13 @@ pub async fn sway_launch_browser(url: &str) -> Fallible<()> {
     .map_err(|e| swayipc::Error::CommandFailed(e.to_string()))?
 }
 
-pub async fn sway_close_workspace(workspace: String) -> Fallible<()> {
-    tokio::task::spawn_blocking(move || -> Fallible<()> {
-        let mut connection = Connection::new()?;
+pub async fn sway_close_workspace(workspace: String) -> anyhow::Result<()> {
+    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        let mut connection = swayipc::Connection::new()?;
         
         // Validate workspace exists
         if !is_valid_workspace(&workspace, &mut connection)? {
-            return Err(swayipc::Error::CommandFailed(
-                "Invalid workspace name".to_string()
-            ));
+            anyhow::bail!("Invalid workspace name");
         }
 
         // // Get workspace tree and find all nodes in target workspace
@@ -316,24 +310,22 @@ lazy_static! {
     static ref CLEANUP_PATTERN: Regex = Regex::new(r"[^0-9: \t]").unwrap();
 }
 
-fn validate_keypress_string(input: &str) -> Fallible<String> {
+fn validate_keypress_string(input: &str) -> anyhow::Result<String> {
     let cleaned = CLEANUP_PATTERN.replace_all(input, "").to_string();
     let cleaned = cleaned.trim();
     
     if !KEYPRESS_PATTERN.is_match(cleaned) {
-        return Err(swayipc::Error::CommandFailed(
-            "Invalid keypress format. Expected 'number:1 number:0'".into()
-        ));
+        anyhow::bail!("Invalid keypress string");
     }
     Ok(cleaned.to_string())
 }
 
 //to simulate keypresses 42:1 38:1 38:0 24:1 24:0 38:1 38:0 42:0 -> LOL
-pub async fn input(keys: String) -> Fallible<()> {
+pub async fn input(keys: String) -> anyhow::Result<()> {
     let validated_input = validate_keypress_string(&keys)?;
     
-    tokio::task::spawn_blocking(move || -> Fallible<()> {
-        let mut connection = Connection::new()?;
+    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        let mut connection = swayipc::Connection::new()?;
         connection.run_command(&format!("exec ydotool key {}", validated_input))?;
         // instead of running through swaycmf
         Ok(())
@@ -343,9 +335,9 @@ pub async fn input(keys: String) -> Fallible<()> {
 }
 
 // simulate mouse movement
-pub async fn mouse_move(x: i32, y: i32) -> Fallible<()> {
-    tokio::task::spawn_blocking(move || -> Fallible<()> {
-        let mut connection = Connection::new()?;
+pub async fn mouse_move(x: i32, y: i32) -> anyhow::Result<()> {
+    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        let mut connection = swayipc::Connection::new()?;
         connection.run_command(&format!("exec ydotool mousemove  -x {} -y {}", x, y))?;
         Ok(())
     })
@@ -355,9 +347,9 @@ pub async fn mouse_move(x: i32, y: i32) -> Fallible<()> {
 
 
 //simulate scroll
-pub async fn mouse_scroll(x: i32, y: i32) -> Fallible<()> {
-    tokio::task::spawn_blocking(move || -> Fallible<()> {
-        let mut connection = Connection::new()?;
+pub async fn mouse_scroll(x: i32, y: i32) -> anyhow::Result<()> {
+    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        let mut connection = swayipc::Connection::new()?;
         connection.run_command(&format!("exec ydotool mousemove -w  -x {} -y {}", x, y))?;
         Ok(())
     })
@@ -391,15 +383,17 @@ impl MouseButton {
         }
     }
 
-    fn from_str(s: &str) -> Fallible<Self> {
+    fn from_str(s: &str) -> anyhow::Result<Self> {
         match s.to_uppercase().as_str() {
+            "LEFT" => Ok(MouseButton::Left),
+            "RIGHT" => Ok(MouseButton::Right),
             "MIDDLE" => Ok(MouseButton::Middle),
             "SIDE" => Ok(MouseButton::Side),
             "EXTRA" => Ok(MouseButton::Extra),
             "FORWARD" => Ok(MouseButton::Forward),
             "BACK" => Ok(MouseButton::Back),
             "TASK" => Ok(MouseButton::Task),
-            _ => Err(swayipc::Error::CommandFailed(format!("Invalid mouse button: {}", s))),
+            _ => anyhow::bail!("Invalid mouse button"),
         }
     }
 
@@ -408,12 +402,12 @@ impl MouseButton {
     }
 }
 
-pub async fn mouse_click(button: String) -> Fallible<()> {
+pub async fn mouse_click(button: String) -> anyhow::Result<()> {
     let mouse_button = MouseButton::from_str(&button)?;
     let click_value = mouse_button.click_value();
     
-    tokio::task::spawn_blocking(move || -> Fallible<()> {
-        let mut connection = Connection::new()?;
+    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        let mut connection = swayipc::Connection::new()?;
         connection.run_command(&format!("exec ydotool click {:#04x}", click_value))?;
         Ok(())
     })

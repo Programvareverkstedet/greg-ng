@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use utoipa::OpenApi;
 use utoipa_axum::{router::OpenApiRouter, routes};
 use utoipa_swagger_ui::SwaggerUi;
-use futures::FutureExt;
+///use futures::FutureExt;
 
 use super::base;
 
@@ -413,10 +413,10 @@ async fn playlist_set_looping(
 }
 
 
-#[derive(serde::Deserialize, utoipa::ToSchema)]
-struct SwayCommandBody {
-    command: String,
-}
+// #[derive(serde::Deserialize, utoipa::ToSchema)]
+// struct SwayCommandBody {
+//     command: String,
+// }
 
 // #[utoipa::path(
 //     post,
@@ -446,7 +446,7 @@ struct SwayBrowserBody {
     )
 )]
 async fn sway_launch_browser_handler(Json(body): Json<SwayBrowserBody>) -> RestResponse {
-    base::sway_launch_browser(&body.url).await.map_err(anyhow::Error::new).into()
+    base::sway_launch_browser(&body.url).await.into()
 }
 
 #[derive(serde::Deserialize, utoipa::ToSchema)]
@@ -464,7 +464,7 @@ struct SwayWorkspaceBody {
     )
 )]
 async fn sway_close_workspace_handler(Json(body): Json<SwayWorkspaceBody>) -> RestResponse {
-    base::sway_close_workspace(body.workspace).await.map_err(anyhow::Error::new).into()
+    base::sway_close_workspace(body.workspace).await.into()
 }
 
 #[utoipa::path(
@@ -477,7 +477,7 @@ async fn sway_close_workspace_handler(Json(body): Json<SwayWorkspaceBody>) -> Re
     )
 )]
 async fn sway_change_workspace_handler(Json(body): Json<SwayWorkspaceBody>) -> RestResponse {
-    base::sway_change_workspace(body.workspace).await.map_err(anyhow::Error::new).into()
+    base::sway_change_workspace(body.workspace).await.into()
 }
 
 #[utoipa::path(
@@ -491,7 +491,6 @@ async fn sway_change_workspace_handler(Json(body): Json<SwayWorkspaceBody>) -> R
 async fn sway_get_workspace_names_handler() -> RestResponse {
     base::sway_get_workspace_names().await
         .map(|workspaces| json!(workspaces))
-        .map_err(anyhow::Error::new)
         .into()
 }
 
@@ -519,7 +518,6 @@ async fn input_handler(
     base::input(payload.keys)
         .await
         .map(|_| json!({}))
-        .map_err(anyhow::Error::new)
         .into()
 }
 
@@ -546,7 +544,6 @@ async fn mouse_move_handler(
     base::mouse_move(payload.x, payload.y)
         .await
         .map(|_| json!({}))
-        .map_err(anyhow::Error::new)
         .into()
 }
 
@@ -565,7 +562,6 @@ async fn mouse_scroll_handler(
     base::mouse_scroll(payload.x, payload.y)
         .await
         .map(|_| json!({}))
-        .map_err(anyhow::Error::new)
         .into()
 }
 
@@ -590,6 +586,5 @@ async fn mouse_click_handler(
     base::mouse_click(payload.button)
         .await
         .map(|_| json!({}))
-        .map_err(anyhow::Error::new)
         .into()
 }

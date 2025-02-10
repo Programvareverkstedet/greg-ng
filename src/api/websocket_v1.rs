@@ -481,29 +481,27 @@ async fn handle_message(
             base::input(keys)
                 .await
                 .map(|_| json!({}))
-                .map_err(anyhow::Error::new)?;
+                .context("Failed to execute input command")?;
             Ok(None)
         }
         WSCommand::MouseMove { x, y } => {
-            base::mouse_move(x, y)
+            let _ = base::mouse_move(x, y)
                 .await
-                .map(|_| json!({}))
-                .map_err(anyhow::Error::new)?;
+                .map(|_| json!({}));
             Ok(None)
         }
         WSCommand::MouseScroll { x, y } => {
-            base::mouse_scroll(x, y)
+            let _ = base::mouse_scroll(x, y)
                 .await
-                .map(|_| json!({}))
-                .map_err(anyhow::Error::new)?;
+                .map(|_| json!({}));
             Ok(None)
         }
         WSCommand::MouseClick { button } => {
-            base::mouse_click(button)
+            let _ = base::mouse_click(button)
                 .await
-                .map(|_| json!({}))
-                .map_err(anyhow::Error::new)?;
+                .map(|_| json!({}));
             Ok(None)
         }
     }
 }
+
