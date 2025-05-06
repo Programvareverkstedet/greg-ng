@@ -214,7 +214,8 @@ async fn handle_connection(
             "type": "initial_state",
             "value": initial_state,
         })
-        .to_string(),
+        .to_string()
+        .into(),
     );
 
     socket.send(message).await.unwrap();
@@ -296,7 +297,7 @@ async fn connection_loop(
             let message = Message::Text(json!({
               "type": "connection_count",
               "value": id_count_watch_receiver.borrow().clone(),
-            }).to_string());
+            }).to_string().into(),);
 
             socket.send(message).await?;
           }
@@ -342,7 +343,7 @@ async fn connection_loop(
                   let message = Message::Text(json!({
                     "type": "response",
                     "value": response,
-                  }).to_string());
+                  }).to_string().into(),);
                   socket.send(message).await?;
                 }
                 Ok(None) => {
@@ -360,7 +361,7 @@ async fn connection_loop(
                 let message = Message::Text(json!({
                   "type": "event",
                   "value": event,
-                }).to_string());
+                }).to_string().into(),);
                 socket.send(message).await?;
               }
               Some(Err(e)) => {

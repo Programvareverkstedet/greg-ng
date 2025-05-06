@@ -36,9 +36,7 @@ pub fn create_mpv_config_file(args_config_file: Option<String>) -> anyhow::Resul
     Ok(tmpfile)
 }
 
-pub async fn connect_to_mpv<'a>(
-    args: &MpvConnectionArgs<'a>,
-) -> anyhow::Result<(Mpv, Option<Child>)> {
+pub async fn connect_to_mpv(args: &MpvConnectionArgs<'_>) -> anyhow::Result<(Mpv, Option<Child>)> {
     log::debug!("Connecting to mpv");
 
     debug_assert!(
