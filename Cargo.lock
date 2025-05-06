@@ -624,6 +624,7 @@ dependencies = [
  "tokio",
  "tower",
  "tower-http",
+ "tungstenite",
  "utoipa",
  "utoipa-axum",
  "utoipa-swagger-ui",
