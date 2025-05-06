@@ -11,8 +11,8 @@ use std::{
 };
 use systemd_journal_logger::JournalLog;
 use tempfile::NamedTempFile;
-use tokio::task::JoinHandle;
-use util::IdPool;
+use tokio::{sync::mpsc, task::JoinHandle};
+use util::{ConnectionEvent, IdPool};
 
 mod api;
 mod mpv_setup;
@@ -94,23 +94,37 @@ async fn setup_systemd_watchdog_thread() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn systemd_update_play_status(playing: bool, current_song: &Option<String>) {
-    sd_notify::notify(
-        false,
-        &[sd_notify::NotifyState::Status(&format!(
-            "{} {:?}",
-            if playing { "[PLAY]" } else { "[STOP]" },
-            if let Some(song) = current_song {
-                song
-            } else {
-                ""
-            }
-        ))],
-    )
-    .unwrap_or_else(|e| log::warn!("Failed to update systemd status with current song: {}", e));
+fn send_play_status(
+    systemd: bool,
+    playing: bool,
+    current_song: &Option<String>,
+    connection_count: u64,
+) {
+    let status = &format!(
+        "[CONN: {}] {} {:?}",
+        connection_count,
+        if playing { "[PLAY]" } else { "[STOP]" },
+        if let Some(song) = current_song {
+            song
+        } else {
+            ""
+        }
+    );
+
+    if systemd {
+        sd_notify::notify(false, &[sd_notify::NotifyState::Status(status)]).unwrap_or_else(|e| {
+            log::warn!("Failed to update systemd status with current song: {}", e)
+        });
+    } else {
+        log::info!("{}", status);
+    }
 }
 
-async fn setup_systemd_notifier(mpv: Mpv) -> anyhow::Result<JoinHandle<()>> {
+async fn start_status_notifier_thread(
+    systemd: bool,
+    mpv: Mpv,
+    mut connection_counter_rx: mpsc::Receiver<ConnectionEvent>,
+) -> anyhow::Result<JoinHandle<()>> {
     let handle = tokio::spawn(async move {
         log::debug!("Starting systemd notifier thread");
         let mut event_stream = mpv.get_event_stream().await;
@@ -120,30 +134,53 @@ async fn setup_systemd_notifier(mpv: Mpv) -> anyhow::Result<JoinHandle<()>> {
 
         let mut current_song: Option<String> = mpv.get_property("media-title").await.unwrap();
         let mut playing = !mpv.get_property("pause").await.unwrap().unwrap_or(false);
+        let mut connection_count = 0;
 
-        systemd_update_play_status(playing, &current_song);
+        send_play_status(systemd, playing, &current_song, connection_count);
 
         loop {
-            if let Some(Ok(Event::PropertyChange { name, data, .. })) = event_stream.next().await {
-                match (name.as_str(), data) {
-                    ("media-title", Some(MpvDataType::String(s))) => {
-                        current_song = Some(s);
+            tokio::select! {
+                Some(Ok(Event::PropertyChange { name, data, .. })) = event_stream.next() => {
+                    match (name.as_str(), data) {
+                        ("media-title", Some(MpvDataType::String(s))) => {
+                            current_song = Some(s);
+                        }
+                        ("media-title", None) => {
+                            current_song = None;
+                        }
+                        ("pause", Some(MpvDataType::Bool(b))) => {
+                            playing = !b;
+                        }
+                        (event_name, _) => {
+                            log::trace!(
+                                "Received unexpected property change on systemd notifier thread: {}",
+                                event_name
+                            );
+                        }
                     }
-                    ("media-title", None) => {
-                        current_song = None;
-                    }
-                    ("pause", Some(MpvDataType::Bool(b))) => {
-                        playing = !b;
-                    }
-                    (event_name, _) => {
-                        log::trace!(
-                            "Received unexpected property change on systemd notifier thread: {}",
-                            event_name
-                        );
-                    }
+
+                    send_play_status(systemd, playing, &current_song, connection_count)
                 }
 
-                systemd_update_play_status(playing, &current_song)
+                Some(connection_counter_update) = connection_counter_rx.recv() => {
+                    log::trace!("Received connection counter update: {}", connection_counter_update);
+
+                    match connection_count.checked_add_signed(connection_counter_update.to_i8().into()) {
+                        Some(new_count) => connection_count = new_count,
+                        None => {
+                            log::warn!("Invalid connection count: trying to add {} to {}", connection_counter_update.to_i8(), connection_count);
+                            log::warn!("Resetting connection count to 0");
+                            connection_count = 0;
+                        }
+                    }
+
+                    match connection_count {
+                        0 => log::debug!("No connections"),
+                        _ => log::debug!("Connection count: {}", connection_count),
+                    }
+
+                    send_play_status(systemd, playing, &current_song, connection_count);
+                }
             }
         }
     });
@@ -206,9 +243,10 @@ async fn main() -> anyhow::Result<()> {
     .await
     .context("Failed to connect to mpv")?;
 
-    if systemd_mode {
-        setup_systemd_notifier(mpv.clone()).await?;
-    }
+    let (connection_counter_tx, connection_counter_rx) = mpsc::channel(10);
+
+    let status_notifier_thread_handle =
+        start_status_notifier_thread(systemd_mode, mpv.clone(), connection_counter_rx).await?;
 
     if let Err(e) = show_grzegorz_image(mpv.clone()).await {
         log::warn!("Could not show Grzegorz image: {}", e);
@@ -232,7 +270,10 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .nest("/api", api::rest_api_routes(mpv.clone()))
-        .nest("/ws", api::websocket_api(mpv.clone(), id_pool.clone()))
+        .nest(
+            "/ws",
+            api::websocket_api(mpv.clone(), id_pool.clone(), connection_counter_tx.clone()),
+        )
         .merge(api::rest_api_docs(mpv.clone()))
         .into_make_service_with_connect_info::<SocketAddr>();
 
@@ -276,6 +317,11 @@ async fn main() -> anyhow::Result<()> {
               shutdown(mpv, Some(proc)).await;
               result?;
             }
+            result = status_notifier_thread_handle => {
+              log::info!("Status notifier thread exited unexpectedly, shutting dow");
+              shutdown(mpv, Some(proc)).await;
+              result?;
+            }
         }
     } else {
         tokio::select! {
@@ -285,6 +331,11 @@ async fn main() -> anyhow::Result<()> {
             }
             result = axum::serve(listener, app) => {
               log::info!("API server exited");
+              shutdown(mpv.clone(), None).await;
+              result?;
+            }
+            result = status_notifier_thread_handle => {
+              log::info!("Status notifier thread exited unexpectedly, shutting down");
               shutdown(mpv.clone(), None).await;
               result?;
             }

@@ -21,18 +21,30 @@ use mpvipc_async::{
     Switch,
 };
 use serde_json::{json, Value};
-use tokio::{select, sync::watch};
+use tokio::{
+    select,
+    sync::{mpsc, watch},
+};
 
-use crate::util::IdPool;
+use crate::util::{ConnectionEvent, IdPool};
 
 #[derive(Debug, Clone)]
 struct WebsocketState {
     mpv: Mpv,
     id_pool: Arc<Mutex<IdPool>>,
+    connection_counter_tx: mpsc::Sender<ConnectionEvent>,
 }
 
-pub fn websocket_api(mpv: Mpv, id_pool: Arc<Mutex<IdPool>>) -> Router {
-    let state = WebsocketState { mpv, id_pool };
+pub fn websocket_api(
+    mpv: Mpv,
+    id_pool: Arc<Mutex<IdPool>>,
+    connection_counter_tx: mpsc::Sender<ConnectionEvent>,
+) -> Router {
+    let state = WebsocketState {
+        mpv,
+        id_pool,
+        connection_counter_tx,
+    };
     Router::new()
         .route("/", any(websocket_handler))
         .with_state(state)
@@ -41,7 +53,11 @@ pub fn websocket_api(mpv: Mpv, id_pool: Arc<Mutex<IdPool>>) -> Router {
 async fn websocket_handler(
     ws: WebSocketUpgrade,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    State(WebsocketState { mpv, id_pool }): State<WebsocketState>,
+    State(WebsocketState {
+        mpv,
+        id_pool,
+        connection_counter_tx,
+    }): State<WebsocketState>,
 ) -> impl IntoResponse {
     let mpv = mpv.clone();
     let id = match id_pool.lock().unwrap().request_id() {
@@ -52,7 +68,9 @@ async fn websocket_handler(
         }
     };
 
-    ws.on_upgrade(move |socket| handle_connection(socket, addr, mpv, id, id_pool))
+    ws.on_upgrade(move |socket| {
+        handle_connection(socket, addr, mpv, id, id_pool, connection_counter_tx)
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -174,7 +192,17 @@ async fn handle_connection(
     mpv: Mpv,
     channel_id: u64,
     id_pool: Arc<Mutex<IdPool>>,
+    connection_counter_tx: mpsc::Sender<ConnectionEvent>,
 ) {
+    match connection_counter_tx.send(ConnectionEvent::Connected).await {
+        Ok(()) => {
+            log::trace!("Connection count updated for {:?}", addr);
+        }
+        Err(e) => {
+            log::error!("Error updating connection count for {:?}: {:?}", addr, e);
+        }
+    }
+
     // TODO: There is an asynchronous gap between gathering the initial state and subscribing to the properties
     //       This could lead to missing events if they happen in that gap. Send initial state, but also ensure
     //       that there is an additional "initial state" sent upon subscription to all properties to ensure that
@@ -234,6 +262,18 @@ async fn handle_connection(
         }
         Err(e) => {
             log::error!("Error releasing id {} for {:?}: {:?}", channel_id, addr, e);
+        }
+    }
+
+    match connection_counter_tx
+        .send(ConnectionEvent::Disconnected)
+        .await
+    {
+        Ok(()) => {
+            log::trace!("Connection count updated for {:?}", addr);
+        }
+        Err(e) => {
+            log::error!("Error updating connection count for {:?}: {:?}", addr, e);
         }
     }
 }
