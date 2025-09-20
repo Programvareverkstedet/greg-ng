@@ -34,7 +34,7 @@ rustPlatform.buildRustPackage rec {
   cargoLock = {
     lockFile = ./Cargo.lock;
     outputHashes = {
-      "mpvipc-async-0.1.0" = "sha256-V22wdnVVCBzayqkwb2d0msG7YypVss0cGBihtXrHtuM=";
+      "mpvipc-async-0.1.0" = "sha256-i93QalZ/qtOGha82/0sM31ch1P/jQyRg/98ev1AgEI4=";
     };
   };
 
