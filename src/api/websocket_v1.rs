@@ -317,10 +317,8 @@ async fn connection_loop(
                         let inner_error = e.into_inner();
                         if inner_error
                             .downcast_ref::<tungstenite::error::Error>()
-                            .is_some_and(|e| match *e {
-                                tungstenite::error::Error::Protocol(tungstenite::error::ProtocolError::ResetWithoutClosingHandshake) => true,
-                                _ => false,
-                            }) {
+                            .is_some_and(|e| matches!(*e, tungstenite::error::Error::Protocol(tungstenite::error::ProtocolError::ResetWithoutClosingHandshake)))
+                        {
                             log::warn!("Connection reset without closing handshake for {:?}", addr);
                             return Ok(());
                         } else {

@@ -63,9 +63,9 @@ impl IdPool {
         if id > self.max_id {
             Err(IdPoolError::IdOutOfBound(id))
         } else if self.free_ids.contains(&id) {
-            return Ok(false);
+            Ok(false)
         } else {
-            return Ok(id <= self.id_count);
+            Ok(id <= self.id_count)
         }
     }
 
