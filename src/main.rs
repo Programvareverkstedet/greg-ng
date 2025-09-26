@@ -20,30 +20,39 @@ mod util;
 
 #[derive(Parser)]
 struct Args {
+    /// Hostname to bind the different APIs to.
     #[clap(long, default_value = "localhost")]
     host: String,
 
+    /// Port to bind the different APIs to.
     #[clap(short, long, default_value = "8008")]
     port: u16,
 
     #[command(flatten)]
     verbose: Verbosity,
 
+    /// Start with systemd integrations (sd_notify and watchdog)
     #[clap(long)]
     systemd: bool,
 
+    /// Location of the mpv socket. If none is found, this path will be used when mpv is started.
     #[clap(long, value_name = "PATH", default_value = "/run/mpv/mpv.sock")]
     mpv_socket_path: String,
 
+    /// Location of the mpv binary.
     #[clap(long, value_name = "PATH")]
     mpv_executable_path: Option<String>,
 
+    /// An optional config file for mpv.
     #[clap(long, value_name = "PATH")]
     mpv_config_file: Option<String>,
 
+    /// If no running mpv instance is found, a new will be started.
     #[clap(long, default_value = "true")]
     auto_start_mpv: bool,
 
+    /// If a running mpv instance is already found, it will be closed and a new instance will be
+    /// started.
     #[clap(long, default_value = "true")]
     force_auto_start: bool,
 }
