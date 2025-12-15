@@ -22,9 +22,9 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 systemd-journal-logger = "2.2.2"
 tempfile = "3.23.0"
-tokio = { version = "1.48.0", features = ["full"] }
-tower = { version = "0.5.2", features = ["full"] }
-tower-http = { version = "0.6.8", features = ["full"] }
+tokio = { version = "1.48.0", features = ["rt-multi-thread", "process", "signal"] }
+tower = "0.5.2"
+tower-http = "0.6.8"
 tungstenite = "0.28.0"
 utoipa = { version = "5.4.0", features = ["axum_extras"] }
 utoipa-axum = "0.2.0"
