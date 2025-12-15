@@ -1,12 +1,12 @@
 use axum::{
+    Json, Router,
     extract::{Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{delete, get, post},
-    Json, Router,
 };
 use mpvipc_async::Mpv;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use utoipa::OpenApi;
 use utoipa_axum::{router::OpenApiRouter, routes};

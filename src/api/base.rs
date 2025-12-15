@@ -2,7 +2,7 @@ use mpvipc_async::{
     LoopProperty, Mpv, MpvExt, NumberChangeOptions, PlaylistAddOptions, PlaylistAddTypeOptions,
     SeekOptions, Switch,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// Add item to playlist
 pub async fn loadfile(mpv: Mpv, path: &str) -> anyhow::Result<()> {

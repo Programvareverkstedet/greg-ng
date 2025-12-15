@@ -847,7 +847,7 @@ dependencies = [
 [[package]]
 name = "mpvipc-async"
 version = "0.1.0"
-source = "git+https://git.pvv.ntnu.no/Grzegorz/mpvipc-async.git?branch=main#0934dba9a5d1a7ab832605d2781f43625f25bfad"
+source = "git+https://git.pvv.ntnu.no/Grzegorz/mpvipc-async.git?branch=main#c4b77dd1987e5ad02a9365cb157f76ca986371f8"
 dependencies = [
  "futures",
  "log",

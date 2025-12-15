@@ -4,23 +4,23 @@ use std::{
 };
 
 use anyhow::Context;
-use futures::{stream::FuturesUnordered, StreamExt};
+use futures::{StreamExt, stream::FuturesUnordered};
 use serde::{Deserialize, Serialize};
 
 use axum::{
+    Router,
     extract::{
-        ws::{Message, WebSocket},
         ConnectInfo, State, WebSocketUpgrade,
+        ws::{Message, WebSocket},
     },
     response::IntoResponse,
     routing::any,
-    Router,
 };
 use mpvipc_async::{
     LoopProperty, Mpv, MpvExt, NumberChangeOptions, Playlist, PlaylistAddTypeOptions, SeekOptions,
     Switch,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::{
     select,
     sync::{mpsc, watch},
