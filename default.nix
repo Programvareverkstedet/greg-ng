@@ -44,7 +44,7 @@ rustPlatform.buildRustPackage rec {
   '';
 
   meta = with lib; {
-    license = licenses.mit;
+    license = licenses.gpl3Only;
     maintainers = with maintainers; [ h7x4 ];
     platforms = platforms.linux ++ platforms.darwin;
     mainProgram = "greg-ng";
