@@ -1,0 +1,2 @@
+[registries]
+pvv-git = { index = "sparse+https://git.pvv.ntnu.no/api/packages/Grzegorz/cargo/" }
