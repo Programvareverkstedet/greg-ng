@@ -80,17 +80,16 @@ async fn resolve(host: &str) -> anyhow::Result<IpAddr> {
 /// Helper function that spawns a tokio thread that
 /// continuously sends a ping to systemd watchdog, if enabled.
 async fn setup_systemd_watchdog_thread() -> anyhow::Result<()> {
-    let mut watchdog_microsecs: u64 = 0;
-    if sd_notify::watchdog_enabled(true, &mut watchdog_microsecs) {
-        watchdog_microsecs = watchdog_microsecs.div_ceil(2);
+    if let Some(mut watchdog_microsecs) = sd_notify::watchdog_enabled() {
+        watchdog_microsecs /= 2;
         tokio::spawn(async move {
             log::debug!(
                 "Starting systemd watchdog thread with {} millisecond interval",
-                watchdog_microsecs.div_ceil(1000)
+                watchdog_microsecs.as_millis()
             );
             loop {
-                tokio::time::sleep(tokio::time::Duration::from_micros(watchdog_microsecs)).await;
-                if let Err(err) = sd_notify::notify(false, &[sd_notify::NotifyState::Watchdog]) {
+                tokio::time::sleep(watchdog_microsecs).await;
+                if let Err(err) = sd_notify::notify(&[sd_notify::NotifyState::Watchdog]) {
                     log::warn!("Failed to notify systemd watchdog: {}", err);
                 } else {
                     log::trace!("Ping sent to systemd watchdog");
@@ -121,7 +120,7 @@ fn send_play_status(
     );
 
     if systemd {
-        sd_notify::notify(false, &[sd_notify::NotifyState::Status(status)]).unwrap_or_else(|e| {
+        sd_notify::notify(&[sd_notify::NotifyState::Status(status)]).unwrap_or_else(|e| {
             log::warn!("Failed to update systemd status with current song: {}", e)
         });
     } else {
@@ -199,7 +198,7 @@ async fn start_status_notifier_thread(
 
 async fn shutdown(mpv: Mpv, proc: Option<tokio::process::Child>) {
     log::info!("Shutting down");
-    sd_notify::notify(false, &[sd_notify::NotifyState::Stopping]).unwrap_or_else(|e| {
+    sd_notify::notify(&[sd_notify::NotifyState::Stopping]).unwrap_or_else(|e| {
         log::warn!(
             "Failed to notify systemd that the service is stopping: {}",
             e
@@ -299,7 +298,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     if systemd_mode {
-        match sd_notify::notify(false, &[sd_notify::NotifyState::Ready])
+        match sd_notify::notify(&[sd_notify::NotifyState::Ready])
             .context("Failed to notify systemd that the service is ready")
         {
             Ok(_) => log::trace!("Notified systemd that the service is ready"),
