@@ -59,7 +59,7 @@
     overlays = {
       default = self.overlays.greg-ng;
       greg-ng = final: prev: {
-        inherit (self.packages.${prev.system}) greg-ng;
+        inherit (self.packages.${prev.stdenv.hostPlatform.system}) greg-ng;
       };
     };
 
