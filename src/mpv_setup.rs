@@ -17,7 +17,7 @@ const YTDL_HOOK_ARGS: [&str; 2] = ["try_ytdl_first=yes", "thumbnails=none"];
 pub fn create_mpv_config_file(args_config_file: Option<String>) -> anyhow::Result<NamedTempFile> {
     let file_content = if let Some(path) = args_config_file {
         if !Path::new(&path).exists() {
-            anyhow::bail!("Mpv config file not found at {}", &path);
+            anyhow::bail!("Mpv config file not found at {}", path);
         }
 
         std::fs::read_to_string(&path).context("Failed to read mpv config file")?
@@ -47,9 +47,9 @@ pub async fn connect_to_mpv(args: &MpvConnectionArgs<'_>) -> anyhow::Result<(Mpv
     let socket_path = Path::new(&args.socket_path);
 
     if !socket_path.exists() {
-        log::debug!("Mpv socket not found at {}", &args.socket_path);
+        log::debug!("Mpv socket not found at {}", args.socket_path);
         if !args.auto_start {
-            panic!("Mpv socket not found at {}", &args.socket_path);
+            panic!("Mpv socket not found at {}", args.socket_path);
         }
 
         log::debug!("Ensuring parent dir of mpv socket exists");
@@ -61,7 +61,7 @@ pub async fn connect_to_mpv(args: &MpvConnectionArgs<'_>) -> anyhow::Result<(Mpv
             create_dir_all(parent_dir).context("Failed to create parent dir of mpv socket")?;
         }
     } else {
-        log::debug!("Existing mpv socket found at {}", &args.socket_path);
+        log::debug!("Existing mpv socket found at {}", args.socket_path);
         if args.force_auto_start {
             log::debug!("Removing mpv socket");
             std::fs::remove_file(&args.socket_path)?;
@@ -69,12 +69,12 @@ pub async fn connect_to_mpv(args: &MpvConnectionArgs<'_>) -> anyhow::Result<(Mpv
     }
 
     let process_handle = if args.auto_start {
-        log::info!("Starting mpv with socket at {}", &args.socket_path);
+        log::info!("Starting mpv with socket at {}", args.socket_path);
 
         // TODO: try to fetch mpv from PATH
         Some(
             Command::new(args.executable_path.as_deref().unwrap_or("mpv"))
-                .arg(format!("--input-ipc-server={}", &args.socket_path))
+                .arg(format!("--input-ipc-server={}", args.socket_path))
                 .arg("--idle")
                 .arg("--force-window")
                 .arg("--fullscreen")
@@ -88,7 +88,7 @@ pub async fn connect_to_mpv(args: &MpvConnectionArgs<'_>) -> anyhow::Result<(Mpv
                 )
                 .arg(format!(
                     "--include={}",
-                    &args.config_file.path().to_string_lossy()
+                    args.config_file.path().to_string_lossy()
                 ))
                 // .arg("--no-terminal")
                 .arg("--load-unsafe-playlists")
@@ -103,7 +103,7 @@ pub async fn connect_to_mpv(args: &MpvConnectionArgs<'_>) -> anyhow::Result<(Mpv
     // Wait for mpv to create the socket
     if tokio::time::timeout(tokio::time::Duration::from_millis(500), async {
         while !&socket_path.exists() {
-            log::debug!("Waiting for mpv socket at {}", &args.socket_path);
+            log::debug!("Waiting for mpv socket at {}", args.socket_path);
             tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
         }
     })
@@ -112,14 +112,14 @@ pub async fn connect_to_mpv(args: &MpvConnectionArgs<'_>) -> anyhow::Result<(Mpv
     {
         return Err(anyhow::anyhow!(
             "Failed to connect to mpv socket: {}",
-            &args.socket_path
+            args.socket_path
         ));
     }
 
     Ok((
         Mpv::connect(&args.socket_path).await.context(format!(
             "Failed to connect to mpv socket: {}",
-            &args.socket_path
+            args.socket_path
         ))?,
         process_handle,
     ))

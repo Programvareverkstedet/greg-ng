@@ -262,7 +262,7 @@ async fn main() -> anyhow::Result<()> {
 
     let addr = match resolve(&args.host)
         .await
-        .context(format!("Failed to resolve address: {}", &args.host))
+        .context(format!("Failed to resolve address: {}", args.host))
     {
         Ok(addr) => addr,
         Err(e) => {
@@ -287,7 +287,7 @@ async fn main() -> anyhow::Result<()> {
 
     let listener = match tokio::net::TcpListener::bind(&socket_addr)
         .await
-        .context(format!("Failed to bind API server to '{}'", &socket_addr))
+        .context(format!("Failed to bind API server to '{}'", socket_addr))
     {
         Ok(listener) => listener,
         Err(e) => {
