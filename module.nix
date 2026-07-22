@@ -102,7 +102,7 @@ in
         serviceConfig = {
           Type = "notify";
           ExecStart = let
-            args = lib.cli.toGNUCommandLineShell { } (cfg.settings // {
+            args = lib.cli.toCommandLineShellGNU { } (cfg.settings // {
               systemd = true;
             });
           in "${lib.getExe cfg.package} ${cfg.logLevel} ${args}";
