@@ -320,6 +320,11 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
+    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .context("Failed to install SIGTERM handler")?;
+    let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
+        .context("Failed to install SIGINT handler")?;
+
     if systemd_mode {
         match sd_notify::notify(&[sd_notify::NotifyState::Ready])
             .context("Failed to notify systemd that the service is ready")
@@ -339,8 +344,12 @@ async fn main() -> anyhow::Result<()> {
                 log::warn!("mpv process exited with status: {}", exit_status?);
                 shutdown(mpv, Some(proc)).await;
             }
-            _ = tokio::signal::ctrl_c() => {
-                log::info!("Received Ctrl-C, exiting");
+            _ = sigint.recv() => {
+                log::info!("Received SIGINT, exiting");
+                shutdown(mpv, Some(proc)).await;
+            }
+            _ = sigterm.recv() => {
+                log::info!("Received SIGTERM, exiting");
                 shutdown(mpv, Some(proc)).await;
             }
             result = axum::serve(listener, app) => {
@@ -356,8 +365,12 @@ async fn main() -> anyhow::Result<()> {
         }
     } else {
         tokio::select! {
-            _ = tokio::signal::ctrl_c() => {
-                log::info!("Received Ctrl-C, exiting");
+            _ = sigint.recv() => {
+                log::info!("Received SIGINT, exiting");
+                shutdown(mpv.clone(), None).await;
+            }
+            _ = sigterm.recv() => {
+                log::info!("Received SIGTERM, exiting");
                 shutdown(mpv.clone(), None).await;
             }
             result = axum::serve(listener, app) => {
