@@ -63,11 +63,19 @@
       };
     };
 
-    packages = forAllSystems (system: pkgs: _: {
+    packages = forAllSystems (system: pkgs: _: let
+      inherit (self) sourceInfo;
+      commitHash = sourceInfo.rev or (lib.substring 0 40 sourceInfo.dirtyRev);
+      commitDate = "${lib.substring 0 4 sourceInfo.lastModifiedDate}-${lib.substring 4 2 sourceInfo.lastModifiedDate}-${lib.substring 6 2 sourceInfo.lastModifiedDate}";
+      commitIsDirty = sourceInfo ? dirtyRev;
+    in {
       default = self.packages.${system}.greg-ng;
-      greg-ng = pkgs.callPackage ./default.nix { };
+      greg-ng = pkgs.callPackage ./default.nix {
+        inherit commitHash commitDate commitIsDirty;
+      };
       greg-ng-wrapped = pkgs.callPackage ./default.nix {
         wrapped = true;
+        inherit commitHash commitDate commitIsDirty;
       };
     });
   } // {

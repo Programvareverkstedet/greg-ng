@@ -18,7 +18,57 @@ mod api;
 mod mpv_setup;
 mod util;
 
+const fn long_version() -> &'static str {
+    const DIRTY_SUFFIX: &str = match option_env!("GIT_DIRTY") {
+        Some(s) => match s.as_bytes() {
+            b"true" => " (dirty)",
+            _ => "",
+        },
+        None => "",
+    };
+
+    const BUILD_PROFILE: &str = match option_env!("BUILD_PROFILE") {
+        Some(s) => s,
+        None => "unknown",
+    };
+
+    const GIT_COMMIT: &str = match option_env!("GIT_COMMIT") {
+        Some(s) => s,
+        None => "unknown",
+    };
+
+    const GIT_COMMIT_DATE: &str = match option_env!("GIT_COMMIT_DATE") {
+        Some(s) => s,
+        None => "unknown",
+    };
+
+    const DEPENDENCY_LIST: &str = match option_env!("DEPENDENCY_LIST") {
+        Some(s) => s,
+        None => "",
+    };
+
+    const_format::concatcp!(
+        env!("CARGO_PKG_VERSION"),
+        "\n",
+        "build profile: ",
+        BUILD_PROFILE,
+        "\n",
+        "commit: ",
+        GIT_COMMIT,
+        DIRTY_SUFFIX,
+        "\n",
+        "commit date: ",
+        GIT_COMMIT_DATE,
+        "\n\n",
+        "[dependencies]\n",
+        const_format::str_replace!(DEPENDENCY_LIST, ";", "\n"),
+    )
+}
+
+const LONG_VERSION: &str = long_version();
+
 #[derive(Parser)]
+#[command(version, long_version = LONG_VERSION)]
 struct Args {
     /// Hostname to bind the different APIs to.
     #[clap(long, default_value = "localhost")]

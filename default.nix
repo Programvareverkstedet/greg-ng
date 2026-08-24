@@ -5,6 +5,9 @@
 , makeWrapper
 , mpv
 , wrapped ? false
+, commitHash ? "unknown"
+, commitDate ? "unknown"
+, commitIsDirty ? false
 }:
 
 rustPlatform.buildRustPackage rec {
@@ -28,6 +31,12 @@ rustPlatform.buildRustPackage rec {
         ".envrc"
       ])
     ])) ./.;
+
+  env = {
+    GIT_COMMIT = commitHash;
+    GIT_COMMIT_DATE = commitDate;
+    GIT_DIRTY = lib.boolToString commitIsDirty;
+  };
 
   nativeBuildInputs = [ makeWrapper ];
 

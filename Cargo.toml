@@ -20,6 +20,7 @@ anyhow = "1.0.104"
 axum = { version = "0.8.9", features = ["macros", "ws"] }
 clap = { version = "4.6.6", features = ["derive"] }
 clap-verbosity-flag = "3.0.4"
+const_format = "0.2.36"
 env_logger = "0.11.11"
 futures = "0.3.34"
 log = "0.4.34"
@@ -37,6 +38,11 @@ tungstenite = "0.30.0"
 utoipa = { version = "5.5.0", features = ["axum_extras"] }
 utoipa-axum = "0.2.0"
 utoipa-swagger-ui = { version = "9.0.2", features = ["axum", "vendored"] }
+
+[build-dependencies]
+build-info-build = "0.0.46"
+git2 = { version = "0.21.0", default-features = false }
+time = { version = "0.3", features = ["formatting", "macros"] }
 
 [profile.release]
 strip = true
