@@ -170,13 +170,13 @@ const DEFAULT_PROPERTY_SUBSCRIPTIONS: [&str; 11] = [
     "volume",
 ];
 
-async fn setup_default_subscribes(mpv: &Mpv) -> anyhow::Result<()> {
+async fn setup_default_subscribes(mpv: &Mpv, channel_id: u64) -> anyhow::Result<()> {
     let mut futures = FuturesUnordered::new();
 
     futures.extend(
         DEFAULT_PROPERTY_SUBSCRIPTIONS
             .iter()
-            .map(|property| mpv.observe_property(0, property)),
+            .map(|property| mpv.observe_property(channel_id, property)),
     );
 
     while let Some(result) = futures.next().await {
@@ -220,7 +220,7 @@ async fn handle_connection(
 
     socket.send(message).await.unwrap();
 
-    setup_default_subscribes(&mpv).await.unwrap();
+    setup_default_subscribes(&mpv, channel_id).await.unwrap();
 
     let id_count_watch_receiver = id_pool.lock().unwrap().get_id_count_watch_receiver();
 
