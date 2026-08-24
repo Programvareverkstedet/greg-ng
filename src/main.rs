@@ -265,11 +265,12 @@ async fn main() -> anyhow::Result<()> {
     .await
     .context("Failed to connect to mpv")?;
 
+    let health_checks = HealthCheckRegistry::new();
+    let mpv_health_check_rx = health_checks.register("mpv-ipc");
+    setup_mpv_health_check_thread(mpv.clone(), mpv_health_check_rx);
+
     if systemd_mode {
-        let mut health_checks = HealthCheckRegistry::new();
-        let mpv_health_check_rx = health_checks.register("mpv-ipc");
-        setup_mpv_health_check_thread(mpv.clone(), mpv_health_check_rx);
-        setup_systemd_watchdog_thread(health_checks).await?;
+        setup_systemd_watchdog_thread(health_checks.clone()).await?;
     }
 
     let (connection_counter_tx, connection_counter_rx) = mpsc::channel(10);
@@ -303,6 +304,7 @@ async fn main() -> anyhow::Result<()> {
             "/ws",
             api::websocket_api(mpv.clone(), id_pool.clone(), connection_counter_tx.clone()),
         )
+        .merge(api::health_routes(health_checks))
         .merge(api::rest_api_docs(mpv.clone()))
         .into_make_service_with_connect_info::<SocketAddr>();
 
