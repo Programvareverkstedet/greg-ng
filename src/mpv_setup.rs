@@ -1,7 +1,12 @@
-use std::{fs::create_dir_all, io::Write, path::Path};
+use std::{
+    io::Write,
+    os::fd::{AsRawFd, OwnedFd},
+    path::Path,
+};
 
 use anyhow::Context;
 use mpvipc_async::{Mpv, MpvExt};
+use nix::sys::socket::{AddressFamily, SockFlag, SockType, socketpair};
 use tempfile::NamedTempFile;
 use tokio::process::{Child, Command};
 
@@ -36,93 +41,94 @@ pub fn create_mpv_config_file(args_config_file: Option<String>) -> anyhow::Resul
     Ok(tmpfile)
 }
 
-pub async fn connect_to_mpv(args: &MpvConnectionArgs<'_>) -> anyhow::Result<(Mpv, Option<Child>)> {
-    log::debug!("Connecting to mpv");
+fn create_mpv_ipc_socketpair() -> anyhow::Result<(tokio::net::UnixStream, OwnedFd)> {
+    let (tx_fd, rx_fd): (OwnedFd, OwnedFd) = socketpair(
+        AddressFamily::Unix,
+        SockType::Stream,
+        None,
+        SockFlag::empty(),
+    )
+    .context("Failed to create mpv IPC socketpair")?;
 
-    debug_assert!(
-        !args.force_auto_start || args.auto_start,
-        "force_auto_start requires auto_start"
+    let tx_std = std::os::unix::net::UnixStream::from(tx_fd);
+    tx_std.set_nonblocking(true)?;
+    let tx = tokio::net::UnixStream::from_std(tx_std)?;
+
+    Ok((tx, rx_fd))
+}
+
+async fn spawn_mpv(
+    executable_path: Option<&str>,
+    config_file: &NamedTempFile,
+) -> anyhow::Result<(Mpv, Child)> {
+    let (tx, rx) = create_mpv_ipc_socketpair()?;
+
+    log::info!(
+        "Starting mpv with an internal IPC socket at fd://{}",
+        rx.as_raw_fd()
     );
 
-    let socket_path = Path::new(&args.socket_path);
-
-    if !socket_path.exists() {
-        log::debug!("Mpv socket not found at {}", args.socket_path);
-        if !args.auto_start {
-            panic!("Mpv socket not found at {}", args.socket_path);
-        }
-
-        log::debug!("Ensuring parent dir of mpv socket exists");
-        let parent_dir = Path::new(&args.socket_path)
-            .parent()
-            .context("Failed to get parent dir of mpv socket")?;
-
-        if !parent_dir.is_dir() {
-            create_dir_all(parent_dir).context("Failed to create parent dir of mpv socket")?;
-        }
-    } else {
-        log::debug!("Existing mpv socket found at {}", args.socket_path);
-        if args.force_auto_start {
-            log::debug!("Removing mpv socket");
-            std::fs::remove_file(&args.socket_path)?;
-        }
-    }
-
-    let process_handle = if args.auto_start {
-        log::info!("Starting mpv with socket at {}", args.socket_path);
-
-        // TODO: try to fetch mpv from PATH
-        Some(
-            Command::new(args.executable_path.as_deref().unwrap_or("mpv"))
-                .arg(format!("--input-ipc-server={}", args.socket_path))
-                .arg("--idle")
-                .arg("--force-window")
-                .arg("--fullscreen")
-                .arg("--no-config")
-                .arg("--ytdl=yes")
-                .args(
-                    YTDL_HOOK_ARGS
-                        .into_iter()
-                        .map(|x| format!("--script-opts=ytdl_hook-{}", x))
-                        .collect::<Vec<_>>(),
-                )
-                .arg(format!(
-                    "--include={}",
-                    args.config_file.path().to_string_lossy()
-                ))
-                // .arg("--no-terminal")
-                .arg("--load-unsafe-playlists")
-                .arg("--keep-open") // Keep last frame of video on end of video
-                .spawn()
-                .context("Failed to start mpv")?,
+    // TODO: try to fetch mpv from PATH
+    let process_handle = Command::new(executable_path.unwrap_or("mpv"))
+        .arg(format!("--input-ipc-client=fd://{}", rx.as_raw_fd()))
+        .arg("--idle")
+        .arg("--force-window")
+        .arg("--fullscreen")
+        .arg("--no-config")
+        .arg("--ytdl=yes")
+        .args(
+            YTDL_HOOK_ARGS
+                .into_iter()
+                .map(|x| format!("--script-opts=ytdl_hook-{}", x))
+                .collect::<Vec<_>>(),
         )
-    } else {
-        None
-    };
+        .arg(format!(
+            "--include={}",
+            config_file.path().to_string_lossy()
+        ))
+        .arg("--load-unsafe-playlists")
+        .arg("--keep-open") // Keep last frame of video on end of video
+        .spawn()
+        .context("Failed to start mpv")?;
 
-    // Wait for mpv to create the socket
+    let mpv = Mpv::connect_socket(tx)
+        .await
+        .context("Failed to connect to mpv")?;
+
+    Ok((mpv, process_handle))
+}
+
+async fn connect_to_running_mpv(socket_path: &str) -> anyhow::Result<Mpv> {
+    let path = Path::new(socket_path);
+
     if tokio::time::timeout(tokio::time::Duration::from_millis(500), async {
-        while !&socket_path.exists() {
-            log::debug!("Waiting for mpv socket at {}", args.socket_path);
+        while !path.exists() {
+            log::debug!("Waiting for mpv socket at {}", socket_path);
             tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
         }
     })
     .await
     .is_err()
     {
-        return Err(anyhow::anyhow!(
-            "Failed to connect to mpv socket: {}",
-            args.socket_path
-        ));
+        anyhow::bail!("Failed to connect to mpv socket: {}", socket_path);
     }
 
-    Ok((
-        Mpv::connect(&args.socket_path).await.context(format!(
-            "Failed to connect to mpv socket: {}",
-            args.socket_path
-        ))?,
-        process_handle,
-    ))
+    Mpv::connect(socket_path)
+        .await
+        .context(format!("Failed to connect to mpv socket: {}", socket_path))
+}
+
+pub async fn connect_to_mpv(args: &MpvConnectionArgs<'_>) -> anyhow::Result<(Mpv, Option<Child>)> {
+    log::debug!("Connecting to mpv");
+
+    if args.auto_start {
+        let (mpv, process_handle) =
+            spawn_mpv(args.executable_path.as_deref(), args.config_file).await?;
+        Ok((mpv, Some(process_handle)))
+    } else {
+        let mpv = connect_to_running_mpv(&args.socket_path).await?;
+        Ok((mpv, None))
+    }
 }
 
 pub async fn show_grzegorz_image(mpv: Mpv) -> anyhow::Result<()> {

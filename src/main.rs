@@ -35,7 +35,7 @@ struct Args {
     #[clap(long)]
     systemd: bool,
 
-    /// Location of the mpv socket. If none is found, this path will be used when mpv is started.
+    /// Location of the mpv socket to connect to, when not auto-starting mpv.
     #[clap(long, value_name = "PATH", default_value = "/run/mpv/mpv.sock")]
     mpv_socket_path: String,
 
@@ -50,11 +50,6 @@ struct Args {
     /// If no running mpv instance is found, a new will be started.
     #[clap(long, default_value = "true")]
     auto_start_mpv: bool,
-
-    /// If a running mpv instance is already found, it will be closed and a new instance will be
-    /// started.
-    #[clap(long, default_value = "true")]
-    force_auto_start: bool,
 }
 
 struct MpvConnectionArgs<'a> {
@@ -62,7 +57,6 @@ struct MpvConnectionArgs<'a> {
     executable_path: Option<String>,
     config_file: &'a NamedTempFile,
     auto_start: bool,
-    force_auto_start: bool,
 }
 
 /// Helper function to resolve a hostname to an IP address.
@@ -246,7 +240,6 @@ async fn main() -> anyhow::Result<()> {
         executable_path: args.mpv_executable_path,
         config_file: &mpv_config_file,
         auto_start: args.auto_start_mpv,
-        force_auto_start: args.force_auto_start,
     })
     .await
     .context("Failed to connect to mpv")?;

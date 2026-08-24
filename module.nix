@@ -79,15 +79,11 @@ in
         type = lib.types.bool;
         default = true;
         description = ''
-          Whether to automatically start mpv.
-        '';
-      };
+          Whether to automatically start our own private mpv instance.
 
-      force-auto-start = lib.mkOption {
-        type = lib.types.bool;
-        default = true;
-        description = ''
-          Whether to force auto starting mpv.
+          ::: {.note}
+          This mpv instance will not use the socket path specified in {option}`mpv-socket-path`.
+          :::
         '';
       };
     };
