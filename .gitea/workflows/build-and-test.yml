@@ -1,0 +1,131 @@
+name: "Build and test"
+run-name: "Build and test"
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+env:
+  BINSTALL_DISABLE_TELEMETRY: 'true'
+
+jobs:
+  build:
+    runs-on: debian-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build
+        run: cargo build --all-features --verbose --release
+
+  check:
+    runs-on: debian-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+            components: rustfmt, clippy
+
+      - name: Check code format
+        run: cargo fmt -- --check
+
+      - name: Check clippy
+        run: cargo clippy -- --deny warnings
+
+  check-license:
+    runs-on: debian-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: cargo-bins/cargo-binstall@main
+
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-deny
+        run: cargo binstall -y cargo-deny
+
+      - name: Check licenses
+        run: |
+          cargo deny check bans licenses sources
+
+  test:
+    runs-on: debian-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: cargo-bins/cargo-binstall@main
+
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+            components: llvm-tools
+
+      - name: Install nextest
+        run: cargo binstall -y cargo-nextest --secure
+
+      - name: Run tests
+        run: cargo nextest run --release --no-fail-fast
+        env:
+          RUST_LOG: "trace"
+          RUSTFLAGS: "-Cinstrument-coverage"
+          LLVM_PROFILE_FILE: "target/coverage/%p-%m.profraw"
+
+      - name: Install grcov
+        if: always()
+        run: cargo binstall -y grcov
+
+      - name: Generate coverage report
+        if: always()
+        run: |
+          grcov \
+            --source-dir . \
+            --binary-path ./target/release/deps/ \
+            --excl-start 'mod test* \{' \
+            --ignore 'tests/*' \
+            --ignore "*test.rs" \
+            --ignore "*tests.rs" \
+            --ignore "*github.com*" \
+            --ignore "*libcore*" \
+            --ignore "*rustc*" \
+            --ignore "*liballoc*" \
+            --ignore "*cargo*" \
+            -t html \
+            -o ./target/coverage/html \
+            target/coverage/
+
+      - name: Upload test report
+        if: always()
+        uses: https://git.pvv.ntnu.no/Projects/rsync-action@v1
+        with:
+          source: target/coverage/html/
+          target: ${{ gitea.ref_name }}/coverage/
+          username: gitea-web
+          ssh-key: ${{ secrets.WEB_SYNC_SSH_KEY }}
+          host: pages.pvv.ntnu.no
+          known-hosts: "pages.pvv.ntnu.no ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIH2QjfFB+city1SYqltkVqWACfo1j37k+oQQfj13mtgg"
+
+  docs:
+    runs-on: debian-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build docs
+        run: cargo doc --all-features --document-private-items --release
+
+      - name: Transfer files
+        if: always()
+        uses: https://git.pvv.ntnu.no/Projects/rsync-action@main
+        with:
+          source: target/doc/
+          target: ${{ gitea.ref_name }}/docs/
+          username: gitea-web
+          ssh-key: ${{ secrets.WEB_SYNC_SSH_KEY }}
+          host: pages.pvv.ntnu.no
+          known-hosts: "pages.pvv.ntnu.no ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIH2QjfFB+city1SYqltkVqWACfo1j37k+oQQfj13mtgg"
