@@ -12,7 +12,7 @@ use std::{
 use systemd_journal_logger::JournalLog;
 use tempfile::NamedTempFile;
 use tokio::{sync::mpsc, task::JoinHandle};
-use util::{ConnectionEvent, IdPool};
+use util::{ConnectionEvent, HealthCheckRegistry, HealthCheckRequest, IdPool};
 
 mod api;
 mod mpv_setup;
@@ -71,22 +71,45 @@ async fn resolve(host: &str) -> anyhow::Result<IpAddr> {
         .ok_or_else(|| anyhow::anyhow!("Failed to resolve address"))
 }
 
-/// Helper function that spawns a tokio thread that
-/// continuously sends a ping to systemd watchdog, if enabled.
-async fn setup_systemd_watchdog_thread() -> anyhow::Result<()> {
-    if let Some(mut watchdog_microsecs) = sd_notify::watchdog_enabled() {
-        watchdog_microsecs /= 2;
+fn setup_mpv_health_check_thread(mpv: Mpv, mut requests: mpsc::Receiver<HealthCheckRequest>) {
+    tokio::spawn(async move {
+        while let Some(reply_tx) = requests.recv().await {
+            let result = mpv
+                .run_command_raw("get_time_us", &[])
+                .await
+                .map(|_| ())
+                .map_err(|e| e.to_string());
+            let _ = reply_tx.send(result);
+        }
+    });
+}
+
+async fn setup_systemd_watchdog_thread(health_checks: HealthCheckRegistry) -> anyhow::Result<()> {
+    if let Some(watchdog_interval) = sd_notify::watchdog_enabled() {
+        let ping_interval = watchdog_interval / 2;
+        let check_timeout = ping_interval / 2;
         tokio::spawn(async move {
             log::debug!(
                 "Starting systemd watchdog thread with {} millisecond interval",
-                watchdog_microsecs.as_millis()
+                ping_interval.as_millis()
             );
             loop {
-                tokio::time::sleep(watchdog_microsecs).await;
-                if let Err(err) = sd_notify::notify(&[sd_notify::NotifyState::Watchdog]) {
-                    log::warn!("Failed to notify systemd watchdog: {}", err);
-                } else {
-                    log::trace!("Ping sent to systemd watchdog");
+                tokio::time::sleep(ping_interval).await;
+
+                match health_checks.all_healthy(check_timeout).await {
+                    Ok(()) => {
+                        if let Err(err) = sd_notify::notify(&[sd_notify::NotifyState::Watchdog]) {
+                            log::warn!("Failed to notify systemd watchdog: {}", err);
+                        } else {
+                            log::trace!("Ping sent to systemd watchdog");
+                        }
+                    }
+                    Err(failed_check) => {
+                        log::warn!(
+                            "Skipping systemd watchdog ping, health check {:?} did not pass",
+                            failed_check
+                        );
+                    }
                 }
             }
         });
@@ -223,8 +246,6 @@ async fn main() -> anyhow::Result<()> {
         log::set_max_level(args.verbose.log_level_filter());
 
         log::debug!("Running with systemd integration");
-
-        setup_systemd_watchdog_thread().await?;
     } else {
         env_logger::Builder::new()
             .filter_level(args.verbose.log_level_filter())
@@ -243,6 +264,13 @@ async fn main() -> anyhow::Result<()> {
     })
     .await
     .context("Failed to connect to mpv")?;
+
+    if systemd_mode {
+        let mut health_checks = HealthCheckRegistry::new();
+        let mpv_health_check_rx = health_checks.register("mpv-ipc");
+        setup_mpv_health_check_thread(mpv.clone(), mpv_health_check_rx);
+        setup_systemd_watchdog_thread(health_checks).await?;
+    }
 
     let (connection_counter_tx, connection_counter_rx) = mpsc::channel(10);
 
