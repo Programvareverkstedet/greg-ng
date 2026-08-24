@@ -68,7 +68,6 @@ async fn spawn_mpv(
         rx.as_raw_fd()
     );
 
-    // TODO: try to fetch mpv from PATH
     let process_handle = Command::new(executable_path.unwrap_or("mpv"))
         .arg(format!("--input-ipc-client=fd://{}", rx.as_raw_fd()))
         .arg("--idle")
