@@ -103,7 +103,9 @@ in
         serviceConfig = {
           Type = "notify";
           ExecStart = let
-            configFile = format.generate "greg-ng.toml" cfg.settings;
+            configFile = format.generate "greg-ng.toml" (
+              lib.filterAttrsRecursive (_: v: v != null) cfg.settings
+            );
           in "${lib.getExe cfg.package} --config ${configFile}";
 
           Restart = "always";
