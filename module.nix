@@ -49,10 +49,11 @@ in
 
           mpv = {
             socket_path = lib.mkOption {
-              type = lib.types.str;
-              default = "%t/greg-ng-mpv.sock";
+              type = with lib.types; nullOr str;
+              default = null;
+              example = "%t/greg-ng-mpv.sock";
               description = ''
-                Path to the mpv socket.
+                Path to the mpv socket to connect to, when not auto-starting mpv.
               '';
             };
 
@@ -76,7 +77,7 @@ in
             };
 
             auto_start = lib.mkOption {
-              type = lib.types.bool;
+              type = with lib.types; nullOr bool;
               default = true;
               description = ''
                 Whether to automatically start our own private mpv instance.

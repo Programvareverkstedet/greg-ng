@@ -48,7 +48,7 @@ where
 #[derive(Default)]
 pub struct MpvConfig {
     /// Location of the mpv socket to connect to, when not auto-starting mpv.
-    pub socket_path: String,
+    pub socket_path: Option<String>,
 
     /// Location of the mpv binary, used when auto-starting mpv.
     pub executable_path: Option<String>,
@@ -58,7 +58,9 @@ pub struct MpvConfig {
 
     /// Instead of using the socket path, start a new private mpv instance
     /// with the given executable and config file.
-    pub auto_start: bool,
+    ///
+    /// Defaults to `true` if `socket_path` is unset, false otherwise.
+    pub auto_start: Option<bool>,
 
     /// A generated temporary file that contains mpv config.
     /// Keeping it here makes the temporary file bound to the lifetime of
@@ -69,17 +71,13 @@ pub struct MpvConfig {
     pub resolved_config_file: Option<NamedTempFile>,
 }
 
-impl Default for MpvConfig {
-    fn default() -> Self {
-        Self {
-            socket_path: "/run/mpv/mpv.sock".to_string(),
-            executable_path: None,
-            config_file: None,
-            auto_start: true,
-            resolved_config_file: None,
-        }
+impl MpvConfig {
+    pub fn should_auto_start(&self) -> bool {
+        self.auto_start
+            .unwrap_or_else(|| self.socket_path.is_none())
     }
 }
+
 
 fn default_config_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
@@ -95,6 +93,17 @@ fn default_config_paths() -> Vec<PathBuf> {
     paths
 }
 
+fn validate(config: &Config) -> anyhow::Result<()> {
+    if config.mpv.socket_path.is_none() && config.mpv.auto_start == Some(false) {
+        anyhow::bail!(
+            "Invalid `mpv` config: `auto_start` is set to false, but no `socket_path` was \
+             given to connect to instead"
+        );
+    }
+
+    Ok(())
+}
+
 fn load_config_from(path: &Path) -> anyhow::Result<Config> {
     log::debug!("Loading config from {}", path.display());
 
@@ -106,18 +115,21 @@ fn load_config_from(path: &Path) -> anyhow::Result<Config> {
 }
 
 pub fn load_config(explicit_path: Option<&str>) -> anyhow::Result<Config> {
-    if let Some(path) = explicit_path {
-        return load_config_from(Path::new(path));
-    }
-
-    match default_config_paths()
-        .into_iter()
-        .find(|path| path.exists())
-    {
-        Some(path) => load_config_from(&path),
-        None => {
-            log::debug!("No config file found, using default configuration");
-            Ok(Config::default())
+    let config = if let Some(path) = explicit_path {
+        load_config_from(Path::new(path))?
+    } else {
+        match default_config_paths()
+            .into_iter()
+            .find(|path| path.exists())
+        {
+            Some(path) => load_config_from(&path)?,
+            None => {
+                log::debug!("No config file found, using default configuration");
+                Config::default()
+            }
         }
-    }
+    };
+
+    validate(&config)?;
+    Ok(config)
 }

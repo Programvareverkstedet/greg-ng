@@ -124,7 +124,7 @@ async fn connect_to_running_mpv(socket_path: &str) -> anyhow::Result<Mpv> {
 pub async fn connect_to_mpv(mpv_config: &mut MpvConfig) -> anyhow::Result<(Mpv, Option<Child>)> {
     log::debug!("Connecting to mpv");
 
-    if mpv_config.auto_start {
+    if mpv_config.should_auto_start() {
         mpv_config.materialize_config_file()?;
         let config_file = mpv_config
             .resolved_config_file
@@ -135,7 +135,11 @@ pub async fn connect_to_mpv(mpv_config: &mut MpvConfig) -> anyhow::Result<(Mpv, 
             spawn_mpv(mpv_config.executable_path.as_deref(), config_file).await?;
         Ok((mpv, Some(process_handle)))
     } else {
-        let mpv = connect_to_running_mpv(&mpv_config.socket_path).await?;
+        let socket_path = mpv_config
+            .socket_path
+            .as_deref()
+            .expect("validated at config load time");
+        let mpv = connect_to_running_mpv(socket_path).await?;
         Ok((mpv, None))
     }
 }
