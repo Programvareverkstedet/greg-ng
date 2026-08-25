@@ -10,7 +10,7 @@ use nix::sys::socket::{AddressFamily, SockFlag, SockType, socketpair};
 use tempfile::NamedTempFile;
 use tokio::process::{Child, Command};
 
-use crate::MpvConnectionArgs;
+use crate::config::MpvConfig;
 
 const DEFAULT_MPV_CONFIG_CONTENT: &str = include_str!("../assets/default-mpv.conf");
 
@@ -19,26 +19,30 @@ const THE_MAN_PNG: &[u8] = include_bytes!("../assets/the_man.png");
 // https://mpv.io/manual/master/#options-ytdl
 const YTDL_HOOK_ARGS: [&str; 2] = ["try_ytdl_first=yes", "thumbnails=none"];
 
-pub fn create_mpv_config_file(args_config_file: Option<String>) -> anyhow::Result<NamedTempFile> {
-    let file_content = if let Some(path) = args_config_file {
-        if !Path::new(&path).exists() {
-            anyhow::bail!("Mpv config file not found at {}", path);
-        }
+impl MpvConfig {
+    fn materialize_config_file(&mut self) -> anyhow::Result<()> {
+        let file_content = match &self.config_file {
+            Some(path) => {
+                if !Path::new(path).exists() {
+                    anyhow::bail!("Mpv config file not found at {}", path);
+                }
 
-        std::fs::read_to_string(&path).context("Failed to read mpv config file")?
-    } else {
-        DEFAULT_MPV_CONFIG_CONTENT.to_string()
-    };
+                std::fs::read_to_string(path).context("Failed to read mpv config file")?
+            }
+            None => DEFAULT_MPV_CONFIG_CONTENT.to_string(),
+        };
 
-    let tmpfile = tempfile::Builder::new()
-        .prefix("mpv-")
-        .rand_bytes(8)
-        .suffix(".conf")
-        .tempfile()?;
+        let tmpfile = tempfile::Builder::new()
+            .prefix("mpv-")
+            .rand_bytes(8)
+            .suffix(".conf")
+            .tempfile()?;
 
-    tmpfile.reopen()?.write_all(file_content.as_bytes())?;
+        tmpfile.reopen()?.write_all(file_content.as_bytes())?;
 
-    Ok(tmpfile)
+        self.resolved_config_file = Some(tmpfile);
+        Ok(())
+    }
 }
 
 fn create_mpv_ipc_socketpair() -> anyhow::Result<(tokio::net::UnixStream, OwnedFd)> {
@@ -117,15 +121,21 @@ async fn connect_to_running_mpv(socket_path: &str) -> anyhow::Result<Mpv> {
         .context(format!("Failed to connect to mpv socket: {}", socket_path))
 }
 
-pub async fn connect_to_mpv(args: &MpvConnectionArgs<'_>) -> anyhow::Result<(Mpv, Option<Child>)> {
+pub async fn connect_to_mpv(mpv_config: &mut MpvConfig) -> anyhow::Result<(Mpv, Option<Child>)> {
     log::debug!("Connecting to mpv");
 
-    if args.auto_start {
+    if mpv_config.auto_start {
+        mpv_config.materialize_config_file()?;
+        let config_file = mpv_config
+            .resolved_config_file
+            .as_ref()
+            .expect("config file was just materialized");
+
         let (mpv, process_handle) =
-            spawn_mpv(args.executable_path.as_deref(), args.config_file).await?;
+            spawn_mpv(mpv_config.executable_path.as_deref(), config_file).await?;
         Ok((mpv, Some(process_handle)))
     } else {
-        let mpv = connect_to_running_mpv(&args.socket_path).await?;
+        let mpv = connect_to_running_mpv(&mpv_config.socket_path).await?;
         Ok((mpv, None))
     }
 }

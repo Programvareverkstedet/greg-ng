@@ -1,20 +1,19 @@
 use anyhow::Context;
 use axum::Router;
 use clap::Parser;
-use clap_verbosity_flag::Verbosity;
 use futures::StreamExt;
-use mpv_setup::{connect_to_mpv, create_mpv_config_file, show_grzegorz_image};
+use mpv_setup::{connect_to_mpv, show_grzegorz_image};
 use mpvipc_async::{Event, Mpv, MpvDataType, MpvExt};
 use std::{
     net::{IpAddr, SocketAddr},
     sync::{Arc, Mutex},
 };
 use systemd_journal_logger::JournalLog;
-use tempfile::NamedTempFile;
 use tokio::{sync::mpsc, task::JoinHandle};
 use util::{ConnectionEvent, HealthCheckRegistry, HealthCheckRequest, IdPool};
 
 mod api;
+mod config;
 mod mpv_setup;
 mod util;
 
@@ -70,43 +69,8 @@ const LONG_VERSION: &str = long_version();
 #[derive(Parser)]
 #[command(version, long_version = LONG_VERSION)]
 struct Args {
-    /// Hostname to bind the different APIs to.
-    #[clap(long, default_value = "localhost")]
-    host: String,
-
-    /// Port to bind the different APIs to.
-    #[clap(short, long, default_value = "8008")]
-    port: u16,
-
-    #[command(flatten)]
-    verbose: Verbosity,
-
-    /// Start with systemd integrations (sd_notify and watchdog)
-    #[clap(long)]
-    systemd: bool,
-
-    /// Location of the mpv socket to connect to, when not auto-starting mpv.
-    #[clap(long, value_name = "PATH", default_value = "/run/mpv/mpv.sock")]
-    mpv_socket_path: String,
-
-    /// Location of the mpv binary.
     #[clap(long, value_name = "PATH")]
-    mpv_executable_path: Option<String>,
-
-    /// An optional config file for mpv.
-    #[clap(long, value_name = "PATH")]
-    mpv_config_file: Option<String>,
-
-    /// If no running mpv instance is found, a new will be started.
-    #[clap(long, default_value = "true")]
-    auto_start_mpv: bool,
-}
-
-struct MpvConnectionArgs<'a> {
-    socket_path: String,
-    executable_path: Option<String>,
-    config_file: &'a NamedTempFile,
-    auto_start: bool,
+    config: Option<String>,
 }
 
 /// Helper function to resolve a hostname to an IP address.
@@ -285,35 +249,29 @@ async fn shutdown(mpv: Mpv, proc: Option<tokio::process::Child>) {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
+    let mut config = config::load_config(args.config.as_deref())?;
 
-    let systemd_mode = args.systemd && sd_notify::booted().unwrap_or(false);
+    let log_level = config.server.verbosity;
+
+    let systemd_mode = sd_notify::booted().unwrap_or(false);
     if systemd_mode {
         JournalLog::new()
             .context("Failed to initialize journald logging")?
             .install()
             .context("Failed to install journald logger")?;
 
-        log::set_max_level(args.verbose.log_level_filter());
+        log::set_max_level(log_level);
 
         log::debug!("Running with systemd integration");
     } else {
-        env_logger::Builder::new()
-            .filter_level(args.verbose.log_level_filter())
-            .init();
+        env_logger::Builder::new().filter_level(log_level).init();
 
         log::info!("Running without systemd integration");
     }
 
-    let mpv_config_file = create_mpv_config_file(args.mpv_config_file)?;
-
-    let (mpv, proc) = connect_to_mpv(&MpvConnectionArgs {
-        socket_path: args.mpv_socket_path,
-        executable_path: args.mpv_executable_path,
-        config_file: &mpv_config_file,
-        auto_start: args.auto_start_mpv,
-    })
-    .await
-    .context("Failed to connect to mpv")?;
+    let (mpv, proc) = connect_to_mpv(&mut config.mpv)
+        .await
+        .context("Failed to connect to mpv")?;
 
     let health_checks = HealthCheckRegistry::new();
     let mpv_health_check_rx = health_checks.register("mpv-ipc");
@@ -332,9 +290,9 @@ async fn main() -> anyhow::Result<()> {
         log::warn!("Could not show Grzegorz image: {}", e);
     }
 
-    let addr = match resolve(&args.host)
+    let addr = match resolve(&config.server.host)
         .await
-        .context(format!("Failed to resolve address: {}", args.host))
+        .context(format!("Failed to resolve address: {}", config.server.host))
     {
         Ok(addr) => addr,
         Err(e) => {
@@ -343,7 +301,7 @@ async fn main() -> anyhow::Result<()> {
             return Err(e);
         }
     };
-    let socket_addr = SocketAddr::new(addr, args.port);
+    let socket_addr = SocketAddr::new(addr, config.server.port);
     log::info!("Starting API on {}", socket_addr);
 
     let id_pool = Arc::new(Mutex::new(IdPool::new_with_max_limit(1024)));
@@ -435,8 +393,6 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     }
-
-    std::mem::drop(mpv_config_file);
 
     Ok(())
 }
