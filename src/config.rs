@@ -78,7 +78,6 @@ impl MpvConfig {
     }
 }
 
-
 fn default_config_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
 
