@@ -67,7 +67,7 @@ async fn spawn_mpv(
 ) -> anyhow::Result<(Mpv, Child)> {
     let (tx, rx) = create_mpv_ipc_socketpair()?;
 
-    log::info!(
+    tracing::info!(
         "Starting mpv with an internal IPC socket at fd://{}",
         rx.as_raw_fd()
     );
@@ -106,7 +106,7 @@ async fn connect_to_running_mpv(socket_path: &str) -> anyhow::Result<Mpv> {
 
     if tokio::time::timeout(tokio::time::Duration::from_millis(500), async {
         while !path.exists() {
-            log::debug!("Waiting for mpv socket at {}", socket_path);
+            tracing::debug!("Waiting for mpv socket at {}", socket_path);
             tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
         }
     })
@@ -122,7 +122,7 @@ async fn connect_to_running_mpv(socket_path: &str) -> anyhow::Result<Mpv> {
 }
 
 pub async fn connect_to_mpv(mpv_config: &mut MpvConfig) -> anyhow::Result<(Mpv, Option<Child>)> {
-    log::debug!("Connecting to mpv");
+    tracing::debug!("Connecting to mpv");
 
     if mpv_config.should_auto_start() {
         mpv_config.materialize_config_file()?;

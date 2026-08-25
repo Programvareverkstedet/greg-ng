@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use serde::{Deserialize, Deserializer};
 use tempfile::NamedTempFile;
+use tracing::level_filters::LevelFilter;
 
 #[derive(Debug, Deserialize, Default)]
 #[serde(default)]
@@ -21,7 +22,7 @@ pub struct ServerConfig {
     pub port: u16,
 
     #[serde(deserialize_with = "deserialize_level_filter")]
-    pub verbosity: log::LevelFilter,
+    pub verbosity: LevelFilter,
 }
 
 impl Default for ServerConfig {
@@ -29,12 +30,12 @@ impl Default for ServerConfig {
         Self {
             host: "localhost".to_string(),
             port: 8008,
-            verbosity: log::LevelFilter::Error,
+            verbosity: LevelFilter::ERROR,
         }
     }
 }
 
-fn deserialize_level_filter<'de, D>(deserializer: D) -> Result<log::LevelFilter, D::Error>
+fn deserialize_level_filter<'de, D>(deserializer: D) -> Result<LevelFilter, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -104,7 +105,7 @@ fn validate(config: &Config) -> anyhow::Result<()> {
 }
 
 fn load_config_from(path: &Path) -> anyhow::Result<Config> {
-    log::debug!("Loading config from {}", path.display());
+    tracing::debug!("Loading config from {}", path.display());
 
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("Failed to read config file at {}", path.display()))?;
@@ -123,7 +124,7 @@ pub fn load_config(explicit_path: Option<&str>) -> anyhow::Result<Config> {
         {
             Some(path) => load_config_from(&path)?,
             None => {
-                log::debug!("No config file found, using default configuration");
+                tracing::debug!("No config file found, using default configuration");
                 Config::default()
             }
         }

@@ -63,7 +63,7 @@ async fn websocket_handler(
     let id = match id_pool.lock().unwrap().request_id() {
         Ok(id) => id,
         Err(e) => {
-            log::error!("Failed to get id from id pool: {:?}", e);
+            tracing::error!("Failed to get id from id pool: {:?}", e);
             return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
@@ -196,10 +196,10 @@ async fn handle_connection(
 ) {
     match connection_counter_tx.send(ConnectionEvent::Connected).await {
         Ok(()) => {
-            log::trace!("Connection count updated for {:?}", addr);
+            tracing::trace!("Connection count updated for {:?}", addr);
         }
         Err(e) => {
-            log::error!("Error updating connection count for {:?}: {:?}", addr, e);
+            tracing::error!("Error updating connection count for {:?}: {:?}", addr, e);
         }
     }
 
@@ -234,22 +234,22 @@ async fn handle_connection(
 
     match connection_loop_result.await {
         Ok(Ok(())) => {
-            log::trace!("Connection loop ended for {:?}", addr);
+            tracing::trace!("Connection loop ended for {:?}", addr);
         }
         Ok(Err(e)) => {
-            log::error!("Error in connection loop for {:?}: {:?}", addr, e);
+            tracing::error!("Error in connection loop for {:?}: {:?}", addr, e);
         }
         Err(e) => {
-            log::error!("Error in connection loop for {:?}: {:?}", addr, e);
+            tracing::error!("Error in connection loop for {:?}: {:?}", addr, e);
         }
     }
 
     match mpv.unobserve_property(channel_id).await {
         Ok(()) => {
-            log::trace!("Unsubscribed from properties for {:?}", addr);
+            tracing::trace!("Unsubscribed from properties for {:?}", addr);
         }
         Err(e) => {
-            log::error!(
+            tracing::error!(
                 "Error unsubscribing from properties for {:?}: {:?}",
                 addr,
                 e
@@ -259,10 +259,10 @@ async fn handle_connection(
 
     match id_pool.lock().unwrap().release_id(channel_id) {
         Ok(()) => {
-            log::trace!("Released id {} for {:?}", channel_id, addr);
+            tracing::trace!("Released id {} for {:?}", channel_id, addr);
         }
         Err(e) => {
-            log::error!("Error releasing id {} for {:?}: {:?}", channel_id, addr, e);
+            tracing::error!("Error releasing id {} for {:?}: {:?}", channel_id, addr, e);
         }
     }
 
@@ -271,10 +271,10 @@ async fn handle_connection(
         .await
     {
         Ok(()) => {
-            log::trace!("Connection count updated for {:?}", addr);
+            tracing::trace!("Connection count updated for {:?}", addr);
         }
         Err(e) => {
-            log::error!("Error updating connection count for {:?}: {:?}", addr, e);
+            tracing::error!("Error updating connection count for {:?}: {:?}", addr, e);
         }
     }
 }
@@ -303,13 +303,13 @@ async fn connection_loop(
             }
 
             message = socket.recv() => {
-                log::trace!("Received command from {:?}: {:?}", addr, message);
+                tracing::trace!("Received command from {:?}: {:?}", addr, message);
 
                 let ws_message_content = match message {
                     Some(Ok(message)) => message,
 
                     None => {
-                        log::debug!("Connection closed for {:?}", addr);
+                        tracing::debug!("Connection closed for {:?}", addr);
                         return Ok(());
                     },
 
@@ -319,22 +319,22 @@ async fn connection_loop(
                             .downcast_ref::<tungstenite::error::Error>()
                             .is_some_and(|e| matches!(*e, tungstenite::error::Error::Protocol(tungstenite::error::ProtocolError::ResetWithoutClosingHandshake)))
                         {
-                            log::warn!("Connection reset without closing handshake for {:?}", addr);
+                            tracing::warn!("Connection reset without closing handshake for {:?}", addr);
                             return Ok(());
                         } else {
-                            log::error!("Error reading message for {:?}: {:?}", addr, inner_error);
+                            tracing::error!("Error reading message for {:?}: {:?}", addr, inner_error);
                             anyhow::bail!("Error reading message for {:?}: {:?}", addr, inner_error);
                         }
                     },
                 };
 
                 if let Message::Close(_) = ws_message_content {
-                    log::trace!("Closing connection for {:?}", addr);
+                    tracing::trace!("Closing connection for {:?}", addr);
                     return Ok(());
                 }
 
                 if let Message::Ping(xs) = ws_message_content {
-                    log::trace!("Ponging {:?} with {:?}", addr, xs);
+                    tracing::trace!("Ponging {:?} with {:?}", addr, xs);
                     socket.send(Message::Pong(xs)).await?;
                     continue;
                 }
@@ -349,12 +349,12 @@ async fn connection_loop(
                     Err(e) => anyhow::bail!("Error parsing message from {:?}: {:?}", addr, e),
                 };
 
-                log::trace!("Handling command from {:?}: {:?}", addr, message_json);
+                tracing::trace!("Handling command from {:?}: {:?}", addr, message_json);
 
                 // TODO: handle errors
                 match handle_message(message_json, mpv.clone(), channel_id).await {
                     Ok(Some(response)) => {
-                        log::trace!("Handled command from {:?} successfully, sending response", addr);
+                        tracing::trace!("Handled command from {:?} successfully, sending response", addr);
                         let message = Message::Text(json!({
                             "type": "response",
                             "value": response,
@@ -362,17 +362,17 @@ async fn connection_loop(
                         socket.send(message).await?;
                     }
                     Ok(None) => {
-                        log::trace!("Handled command from {:?} successfully", addr);
+                        tracing::trace!("Handled command from {:?} successfully", addr);
                     }
                     Err(e) => {
-                        log::error!("Error handling message from {:?}: {:?}", addr, e);
+                        tracing::error!("Error handling message from {:?}: {:?}", addr, e);
                     }
                 }
             }
             event = event_stream.next() => {
                 match event {
                     Some(Ok(event)) => {
-                        log::trace!("Sending event to {:?}: {:?}", addr, event);
+                        tracing::trace!("Sending event to {:?}: {:?}", addr, event);
                         let message = Message::Text(json!({
                             "type": "event",
                             "value": event,
@@ -380,11 +380,11 @@ async fn connection_loop(
                         socket.send(message).await?;
                     }
                     Some(Err(e)) => {
-                        log::error!("Error reading event stream for {:?}: {:?}", addr, e);
+                        tracing::error!("Error reading event stream for {:?}: {:?}", addr, e);
                         anyhow::bail!("Error reading event stream for {:?}: {:?}", addr, e);
                     }
                     None => {
-                        log::trace!("Event stream ended for {:?}", addr);
+                        tracing::trace!("Event stream ended for {:?}", addr);
                         return Ok(());
                     }
                 }
@@ -421,7 +421,7 @@ async fn handle_message(
     let command =
         serde_json::from_value::<WSCommand>(message).context("Failed to parse message")?;
 
-    log::trace!("Successfully parsed message: {:?}", command);
+    tracing::trace!("Successfully parsed message: {:?}", command);
 
     match command {
         // WSCommand::Subscribe { property } => {

@@ -47,7 +47,7 @@ impl HealthCheckRegistry {
             .map_err(|_| format!("timed out after {} milliseconds", timeout.as_millis()))
             .and_then(|result| result)
             .map_err(|reason| {
-                log::warn!("Health check {:?} failed: {}", name, reason);
+                tracing::warn!("Health check {:?} failed: {}", name, reason);
                 *name
             })
         }))

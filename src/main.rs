@@ -8,8 +8,8 @@ use std::{
     net::{IpAddr, SocketAddr},
     sync::{Arc, Mutex},
 };
-use systemd_journal_logger::JournalLog;
 use tokio::{sync::mpsc, task::JoinHandle};
+use tracing_subscriber::layer::SubscriberExt;
 use util::{ConnectionEvent, HealthCheckRegistry, HealthCheckRequest, IdPool};
 
 mod api;
@@ -103,7 +103,7 @@ async fn setup_systemd_watchdog_thread(health_checks: HealthCheckRegistry) -> an
         let ping_interval = watchdog_interval / 2;
         let check_timeout = ping_interval / 2;
         tokio::spawn(async move {
-            log::debug!(
+            tracing::debug!(
                 "Starting systemd watchdog thread with {} millisecond interval",
                 ping_interval.as_millis()
             );
@@ -113,13 +113,13 @@ async fn setup_systemd_watchdog_thread(health_checks: HealthCheckRegistry) -> an
                 match health_checks.all_healthy(check_timeout).await {
                     Ok(()) => {
                         if let Err(err) = sd_notify::notify(&[sd_notify::NotifyState::Watchdog]) {
-                            log::warn!("Failed to notify systemd watchdog: {}", err);
+                            tracing::warn!("Failed to notify systemd watchdog: {}", err);
                         } else {
-                            log::trace!("Ping sent to systemd watchdog");
+                            tracing::trace!("Ping sent to systemd watchdog");
                         }
                     }
                     Err(failed_check) => {
-                        log::warn!(
+                        tracing::warn!(
                             "Skipping systemd watchdog ping, health check {:?} did not pass",
                             failed_check
                         );
@@ -128,7 +128,7 @@ async fn setup_systemd_watchdog_thread(health_checks: HealthCheckRegistry) -> an
             }
         });
     } else {
-        log::info!("Watchdog not enabled, skipping");
+        tracing::info!("Watchdog not enabled, skipping");
     }
     Ok(())
 }
@@ -152,10 +152,10 @@ fn send_play_status(
 
     if systemd {
         sd_notify::notify(&[sd_notify::NotifyState::Status(status)]).unwrap_or_else(|e| {
-            log::warn!("Failed to update systemd status with current song: {}", e)
+            tracing::warn!("Failed to update systemd status with current song: {}", e)
         });
     } else {
-        log::info!("{}", status);
+        tracing::info!("{}", status);
     }
 }
 
@@ -165,7 +165,7 @@ async fn start_status_notifier_thread(
     mut connection_counter_rx: mpsc::Receiver<ConnectionEvent>,
 ) -> anyhow::Result<JoinHandle<()>> {
     let handle = tokio::spawn(async move {
-        log::debug!("Starting systemd notifier thread");
+        tracing::debug!("Starting systemd notifier thread");
         let mut event_stream = mpv.get_event_stream().await;
 
         mpv.observe_property(100, "media-title").await.unwrap();
@@ -191,7 +191,7 @@ async fn start_status_notifier_thread(
                             playing = !b;
                         }
                         (event_name, _) => {
-                            log::trace!(
+                            tracing::trace!(
                                 "Received unexpected property change on systemd notifier thread: {}",
                                 event_name
                             );
@@ -202,20 +202,20 @@ async fn start_status_notifier_thread(
                 }
 
                 Some(connection_counter_update) = connection_counter_rx.recv() => {
-                    log::trace!("Received connection counter update: {}", connection_counter_update);
+                    tracing::trace!("Received connection counter update: {}", connection_counter_update);
 
                     match connection_count.checked_add_signed(connection_counter_update.to_i8().into()) {
                         Some(new_count) => connection_count = new_count,
                         None => {
-                            log::warn!("Invalid connection count: trying to add {} to {}", connection_counter_update.to_i8(), connection_count);
-                            log::warn!("Resetting connection count to 0");
+                            tracing::warn!("Invalid connection count: trying to add {} to {}", connection_counter_update.to_i8(), connection_count);
+                            tracing::warn!("Resetting connection count to 0");
                             connection_count = 0;
                         }
                     }
 
                     match connection_count {
-                        0 => log::debug!("No connections"),
-                        _ => log::debug!("Connection count: {}", connection_count),
+                        0 => tracing::debug!("No connections"),
+                        _ => tracing::debug!("Connection count: {}", connection_count),
                     }
 
                     send_play_status(systemd, playing, &current_song, connection_count);
@@ -228,9 +228,9 @@ async fn start_status_notifier_thread(
 }
 
 async fn shutdown(mpv: Mpv, proc: Option<tokio::process::Child>) {
-    log::info!("Shutting down");
+    tracing::info!("Shutting down");
     sd_notify::notify(&[sd_notify::NotifyState::Stopping]).unwrap_or_else(|e| {
-        log::warn!(
+        tracing::warn!(
             "Failed to notify systemd that the service is stopping: {}",
             e
         )
@@ -238,11 +238,11 @@ async fn shutdown(mpv: Mpv, proc: Option<tokio::process::Child>) {
 
     mpv.disconnect()
         .await
-        .unwrap_or_else(|e| log::warn!("Failed to disconnect from mpv: {}", e));
+        .unwrap_or_else(|e| tracing::warn!("Failed to disconnect from mpv: {}", e));
     if let Some(mut proc) = proc {
         proc.kill()
             .await
-            .unwrap_or_else(|e| log::warn!("Failed to kill mpv process: {}", e));
+            .unwrap_or_else(|e| tracing::warn!("Failed to kill mpv process: {}", e));
     }
 }
 
@@ -255,18 +255,21 @@ async fn main() -> anyhow::Result<()> {
 
     let systemd_mode = sd_notify::booted().unwrap_or(false);
     if systemd_mode {
-        JournalLog::new()
-            .context("Failed to initialize journald logging")?
-            .install()
-            .context("Failed to install journald logger")?;
+        let subscriber = tracing_subscriber::Registry::default()
+            .with(log_level)
+            .with(tracing_journald::layer().context("Failed to connect to journald")?);
+        tracing::subscriber::set_global_default(subscriber)
+            .context("Failed to set global default tracing subscriber")?;
 
-        log::set_max_level(log_level);
-
-        log::debug!("Running with systemd integration");
+        tracing::debug!("Running with systemd integration");
     } else {
-        env_logger::Builder::new().filter_level(log_level).init();
+        let subscriber = tracing_subscriber::Registry::default()
+            .with(log_level)
+            .with(tracing_subscriber::fmt::layer());
+        tracing::subscriber::set_global_default(subscriber)
+            .context("Failed to set global default tracing subscriber")?;
 
-        log::info!("Running without systemd integration");
+        tracing::info!("Running without systemd integration");
     }
 
     let (mpv, proc) = connect_to_mpv(&mut config.mpv)
@@ -287,7 +290,7 @@ async fn main() -> anyhow::Result<()> {
         start_status_notifier_thread(systemd_mode, mpv.clone(), connection_counter_rx).await?;
 
     if let Err(e) = show_grzegorz_image(mpv.clone()).await {
-        log::warn!("Could not show Grzegorz image: {}", e);
+        tracing::warn!("Could not show Grzegorz image: {}", e);
     }
 
     let addr = match resolve(&config.server.host)
@@ -296,13 +299,13 @@ async fn main() -> anyhow::Result<()> {
     {
         Ok(addr) => addr,
         Err(e) => {
-            log::error!("{}", e);
+            tracing::error!("{}", e);
             shutdown(mpv, proc).await;
             return Err(e);
         }
     };
     let socket_addr = SocketAddr::new(addr, config.server.port);
-    log::info!("Starting API on {}", socket_addr);
+    tracing::info!("Starting API on {}", socket_addr);
 
     let id_pool = Arc::new(Mutex::new(IdPool::new_with_max_limit(1024)));
 
@@ -322,7 +325,7 @@ async fn main() -> anyhow::Result<()> {
     {
         Ok(listener) => listener,
         Err(e) => {
-            log::error!("{}", e);
+            tracing::error!("{}", e);
             shutdown(mpv, proc).await;
             return Err(e);
         }
@@ -337,9 +340,9 @@ async fn main() -> anyhow::Result<()> {
         match sd_notify::notify(&[sd_notify::NotifyState::Ready])
             .context("Failed to notify systemd that the service is ready")
         {
-            Ok(_) => log::trace!("Notified systemd that the service is ready"),
+            Ok(_) => tracing::trace!("Notified systemd that the service is ready"),
             Err(e) => {
-                log::error!("{}", e);
+                tracing::error!("{}", e);
                 shutdown(mpv, proc).await;
                 return Err(e);
             }
@@ -349,24 +352,24 @@ async fn main() -> anyhow::Result<()> {
     if let Some(mut proc) = proc {
         tokio::select! {
             exit_status = proc.wait() => {
-                log::warn!("mpv process exited with status: {}", exit_status?);
+                tracing::warn!("mpv process exited with status: {}", exit_status?);
                 shutdown(mpv, Some(proc)).await;
             }
             _ = sigint.recv() => {
-                log::info!("Received SIGINT, exiting");
+                tracing::info!("Received SIGINT, exiting");
                 shutdown(mpv, Some(proc)).await;
             }
             _ = sigterm.recv() => {
-                log::info!("Received SIGTERM, exiting");
+                tracing::info!("Received SIGTERM, exiting");
                 shutdown(mpv, Some(proc)).await;
             }
             result = axum::serve(listener, app) => {
-              log::info!("API server exited");
+              tracing::info!("API server exited");
               shutdown(mpv, Some(proc)).await;
               result?;
             }
             result = status_notifier_thread_handle => {
-              log::info!("Status notifier thread exited unexpectedly, shutting dow");
+              tracing::info!("Status notifier thread exited unexpectedly, shutting dow");
               shutdown(mpv, Some(proc)).await;
               result?;
             }
@@ -374,20 +377,20 @@ async fn main() -> anyhow::Result<()> {
     } else {
         tokio::select! {
             _ = sigint.recv() => {
-                log::info!("Received SIGINT, exiting");
+                tracing::info!("Received SIGINT, exiting");
                 shutdown(mpv.clone(), None).await;
             }
             _ = sigterm.recv() => {
-                log::info!("Received SIGTERM, exiting");
+                tracing::info!("Received SIGTERM, exiting");
                 shutdown(mpv.clone(), None).await;
             }
             result = axum::serve(listener, app) => {
-              log::info!("API server exited");
+              tracing::info!("API server exited");
               shutdown(mpv.clone(), None).await;
               result?;
             }
             result = status_notifier_thread_handle => {
-              log::info!("Status notifier thread exited unexpectedly, shutting down");
+              tracing::info!("Status notifier thread exited unexpectedly, shutting down");
               shutdown(mpv.clone(), None).await;
               result?;
             }
