@@ -266,8 +266,11 @@ async fn main() -> anyhow::Result<()> {
 
         tracing::debug!("Running with systemd integration");
     } else {
+        let filter = tracing_subscriber::EnvFilter::builder()
+            .with_default_directive(log_level.into())
+            .from_env_lossy();
         let subscriber = tracing_subscriber::Registry::default()
-            .with(log_level)
+            .with(filter)
             .with(tracing_subscriber::fmt::layer());
         tracing::subscriber::set_global_default(subscriber)
             .context("Failed to set global default tracing subscriber")?;
