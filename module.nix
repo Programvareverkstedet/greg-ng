@@ -106,7 +106,7 @@ in
             configFile = format.generate "greg-ng.toml" (
               lib.filterAttrsRecursive (_: v: v != null) cfg.settings
             );
-          in "${lib.getExe cfg.package} --config ${configFile}";
+          in "${lib.getExe cfg.package} --systemd --config ${configFile}";
 
           Restart = "always";
           RestartSec = 3;

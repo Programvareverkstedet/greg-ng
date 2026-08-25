@@ -71,6 +71,10 @@ const LONG_VERSION: &str = long_version();
 struct Args {
     #[clap(long, value_name = "PATH")]
     config: Option<String>,
+
+    /// Enable systemd integration (watchdog, status updates, native logging, etc.)
+    #[clap(long, action)]
+    systemd: bool,
 }
 
 /// Helper function to resolve a hostname to an IP address.
@@ -253,8 +257,7 @@ async fn main() -> anyhow::Result<()> {
 
     let log_level = config.server.verbosity;
 
-    let systemd_mode = sd_notify::booted().unwrap_or(false);
-    if systemd_mode {
+    if args.systemd {
         let subscriber = tracing_subscriber::Registry::default()
             .with(log_level)
             .with(tracing_journald::layer().context("Failed to connect to journald")?);
@@ -280,14 +283,14 @@ async fn main() -> anyhow::Result<()> {
     let mpv_health_check_rx = health_checks.register("mpv-ipc");
     setup_mpv_health_check_thread(mpv.clone(), mpv_health_check_rx);
 
-    if systemd_mode {
+    if args.systemd {
         setup_systemd_watchdog_thread(health_checks.clone()).await?;
     }
 
     let (connection_counter_tx, connection_counter_rx) = mpsc::channel(10);
 
     let status_notifier_thread_handle =
-        start_status_notifier_thread(systemd_mode, mpv.clone(), connection_counter_rx).await?;
+        start_status_notifier_thread(args.systemd, mpv.clone(), connection_counter_rx).await?;
 
     if let Err(e) = show_grzegorz_image(mpv.clone()).await {
         tracing::warn!("Could not show Grzegorz image: {}", e);
@@ -336,7 +339,7 @@ async fn main() -> anyhow::Result<()> {
     let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
         .context("Failed to install SIGINT handler")?;
 
-    if systemd_mode {
+    if args.systemd {
         match sd_notify::notify(&[sd_notify::NotifyState::Ready])
             .context("Failed to notify systemd that the service is ready")
         {
