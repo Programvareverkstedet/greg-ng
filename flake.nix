@@ -36,10 +36,15 @@
       default = self.apps.${system}.greg-ng;
       greg-ng = let
         package = self.packages.${system}.greg-ng-wrapped;
+        format = pkgs.formats.toml { };
+        configFile = format.generate "greg-ng.toml" {
+          server.verbosity = "trace";
+          mpv.auto_start = true;
+        };
       in {
         type = "app";
         program = toString (pkgs.writeShellScript "greg-ng" ''
-          ${lib.getExe package} --mpv-socket-path /tmp/greg-ng-mpv.sock -vvvv
+          exec ${lib.getExe package} --config ${configFile}
         '');
       };
     });
