@@ -1,6 +1,7 @@
 { config, pkgs, lib, ... }:
 let
   cfg = config.services.greg-ng;
+  format = pkgs.formats.toml { };
 in
 {
   options.services.greg-ng = {
@@ -14,77 +15,80 @@ in
 
     enablePipewire = lib.mkEnableOption "pipewire" // { default = true; };
 
-    logLevel = lib.mkOption {
-      type = lib.types.enum [ "quiet" "error" "warn" "info" "debug" "trace" ];
-      default = "debug";
-      description = "Log level.";
-      apply = level: {
-        "quiet" = "-q";
-        "error" = "";
-        "warn" = "-v";
-        "info" = "-vv";
-        "debug" = "-vvv";
-        "trace" = "-vvvv";
-      }.${level};
-    };
-
     # TODO: create some better descriptions
-    settings = {
-      host = lib.mkOption {
-        type = lib.types.str;
-        default = "localhost";
-        example = "0.0.0.0";
-        description = ''
-          Which host to bind to.
-        '';
-      };
+    settings = lib.mkOption {
+      default = { };
+      type = lib.types.submodule {
+        freeformType = format.type;
+        options = {
+          server = {
+            host = lib.mkOption {
+              type = lib.types.str;
+              default = "localhost";
+              example = "0.0.0.0";
+              description = ''
+                Which host to bind to.
+              '';
+            };
 
-      port = lib.mkOption {
-        type = lib.types.port;
-        default = 8008;
-        example = 10008;
-        description = ''
-          Which port to bind to.
-        '';
-      };
+            port = lib.mkOption {
+              type = lib.types.port;
+              default = 8008;
+              example = 10008;
+              description = ''
+                Which port to bind to.
+              '';
+            };
 
-      mpv-socket-path = lib.mkOption {
-        type = lib.types.str;
-        default = "%t/greg-ng-mpv.sock";
-        description = ''
-          Path to the mpv socket.
-        '';
-      };
+            verbosity = lib.mkOption {
+              type = lib.types.enum [ "off" "error" "warn" "info" "debug" "trace" ];
+              default = "debug";
+              description = "Log level.";
+            };
+          };
 
-      mpv-executable-path = lib.mkOption {
-        type = lib.types.str;
-        default = lib.getExe cfg.mpvPackage;
-        defaultText = lib.literalExpression ''
-          lib.getExe config.services.greg-ng.mpvPackage
-        '';
-        description = ''
-          Path to the mpv executable.
-        '';
-      };
+          mpv = {
+            socket_path = lib.mkOption {
+              type = lib.types.str;
+              default = "%t/greg-ng-mpv.sock";
+              description = ''
+                Path to the mpv socket.
+              '';
+            };
 
-      mpv-config-file = lib.mkOption {
-        type = with lib.types; nullOr str;
-        default = null;
-        description = ''
-          Path to the mpv config file.
-        '';
-      };
+            executable_path = lib.mkOption {
+              type = lib.types.str;
+              default = lib.getExe cfg.mpvPackage;
+              defaultText = lib.literalExpression ''
+                lib.getExe config.services.greg-ng.mpvPackage
+              '';
+              description = ''
+                Path to the mpv executable.
+              '';
+            };
 
-      auto-start-mpv = lib.mkOption {
-        type = lib.types.bool;
-        default = true;
-        description = ''
-          Whether to automatically start our own private mpv instance.
+            config_file = lib.mkOption {
+              type = with lib.types; nullOr str;
+              default = null;
+              description = ''
+                Path to a mpv config file.
+              '';
+            };
 
-          ::: {.note}
-          This mpv instance will not use the socket path specified in {option}`mpv-socket-path`.
-          :::
-        '';
+            auto_start = lib.mkOption {
+              type = lib.types.bool;
+              default = true;
+              description = ''
+                Whether to automatically start our own private mpv instance.
+
+                ::: {.note}
+                This mpv instance will not use the socket path specified in
+                {option}`services.greg-ng.settings.mpv.socket_path`.
+                :::
+              '';
+            };
+          };
+        };
       };
     };
   };
@@ -98,10 +102,8 @@ in
         serviceConfig = {
           Type = "notify";
           ExecStart = let
-            args = lib.cli.toCommandLineShellGNU { } (cfg.settings // {
-              systemd = true;
-            });
-          in "${lib.getExe cfg.package} ${cfg.logLevel} ${args}";
+            configFile = format.generate "greg-ng.toml" cfg.settings;
+          in "${lib.getExe cfg.package} --config ${configFile}";
 
           Restart = "always";
           RestartSec = 3;
