@@ -29,7 +29,7 @@ impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             host: "localhost".to_string(),
-            port: 8008,
+            port: 8009,
             verbosity: LevelFilter::ERROR,
         }
     }
