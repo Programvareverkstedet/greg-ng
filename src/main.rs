@@ -205,10 +205,17 @@ async fn start_status_notifier_thread(
                             current_song = Some(s);
                         }
                         ("media-title", None) => {
+                            if current_song.is_some() {
+                                tracing::info!("Stopped playback");
+                            }
                             current_song = None;
                         }
                         ("pause", Some(MpvDataType::Bool(b))) => {
-                            playing = !b;
+                            let now_playing = !b;
+                            if playing != now_playing {
+                                tracing::info!("{}", if now_playing { "Resumed playback" } else { "Paused playback" });
+                            }
+                            playing = now_playing;
                         }
                         (event_name, _) => {
                             tracing::trace!(
