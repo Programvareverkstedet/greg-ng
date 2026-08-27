@@ -145,11 +145,13 @@ fn send_play_status(
     playing: bool,
     current_song: &Option<String>,
     connection_count: u64,
+    play_count: u64,
 ) {
     let status = &format!(
-        "[CONN: {}] {} {:?}",
+        "[CONN: {}] [PLAYS: {}] {} {:?}",
         connection_count,
-        if playing { "[PLAY]" } else { "[STOP]" },
+        play_count,
+        if playing { "[▶]" } else { "[⏸]" },
         if let Some(song) = current_song {
             song
         } else {
@@ -181,14 +183,25 @@ async fn start_status_notifier_thread(
         let mut current_song: Option<String> = mpv.get_property("media-title").await.unwrap();
         let mut playing = !mpv.get_property("pause").await.unwrap().unwrap_or(false);
         let mut connection_count = 0;
+        let mut play_count = 0;
 
-        send_play_status(systemd, playing, &current_song, connection_count);
+        send_play_status(
+            systemd,
+            playing,
+            &current_song,
+            connection_count,
+            play_count,
+        );
 
         loop {
             tokio::select! {
                 Some(Ok(Event::PropertyChange { name, data, .. })) = event_stream.next() => {
                     match (name.as_str(), data) {
                         ("media-title", Some(MpvDataType::String(s))) => {
+                            if current_song.as_deref() != Some(s.as_str()) {
+                                play_count += 1;
+                                tracing::info!("Now playing: {}", s);
+                            }
                             current_song = Some(s);
                         }
                         ("media-title", None) => {
@@ -205,7 +218,7 @@ async fn start_status_notifier_thread(
                         }
                     }
 
-                    send_play_status(systemd, playing, &current_song, connection_count)
+                    send_play_status(systemd, playing, &current_song, connection_count, play_count)
                 }
 
                 Some(connection_counter_update) = connection_counter_rx.recv() => {
@@ -225,7 +238,7 @@ async fn start_status_notifier_thread(
                         _ => tracing::debug!("Connection count: {}", connection_count),
                     }
 
-                    send_play_status(systemd, playing, &current_song, connection_count);
+                    send_play_status(systemd, playing, &current_song, connection_count, play_count);
                 }
             }
         }
