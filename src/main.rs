@@ -12,7 +12,7 @@ use tokio::{sync::mpsc, task::JoinHandle};
 use tracing_subscriber::layer::SubscriberExt;
 use util::{
     ConnectionEvent, HealthCheckRegistry, HealthCheckRequest, IdPool, YtDlpCookiesState,
-    default_cookies_path,
+    default_cookies_path, ensure_cookies_file_exists,
 };
 
 mod api;
@@ -302,6 +302,8 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let cookies_path = default_cookies_path();
+    ensure_cookies_file_exists(&cookies_path)
+        .context("Failed to create yt-dlp cookies file")?;
     let (mpv, proc) = connect_to_mpv(&mut config.mpv, &cookies_path)
         .await
         .context("Failed to connect to mpv")?;

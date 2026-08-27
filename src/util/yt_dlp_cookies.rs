@@ -78,6 +78,22 @@ impl YtDlpCookiesState {
     }
 }
 
+const EMPTY_NETSCAPE_COOKIE_FILE: &str = "\
+# Netscape HTTP Cookie File
+# http://curl.haxx.se/rfc/cookie_spec.html
+# This is a generated file!  Do not edit.
+";
+
+pub fn ensure_cookies_file_exists(path: &std::path::Path) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    if !path.exists() {
+        std::fs::write(path, EMPTY_NETSCAPE_COOKIE_FILE)?;
+    }
+    Ok(())
+}
+
 pub fn default_cookies_path() -> PathBuf {
     if let Some(cache_dir) = std::env::var_os("CACHE_DIRECTORY") {
         return PathBuf::from(cache_dir).join("yt-dlp-cookies.txt");
