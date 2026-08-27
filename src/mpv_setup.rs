@@ -5,7 +5,8 @@ use std::{
 };
 
 use anyhow::Context;
-use mpvipc_async::{Mpv, MpvExt};
+use futures::StreamExt;
+use mpvipc_async::{Event, EventLogMessageLevel, Mpv, MpvExt};
 use nix::sys::socket::{AddressFamily, SockFlag, SockType, socketpair};
 use tempfile::NamedTempFile;
 use tokio::process::{Child, Command};
@@ -78,6 +79,7 @@ async fn spawn_mpv(
         .arg("--force-window")
         .arg("--fullscreen")
         .arg("--no-config")
+        .arg("--no-terminal")
         .arg("--ytdl=yes")
         .args(
             YTDL_HOOK_ARGS
@@ -99,6 +101,38 @@ async fn spawn_mpv(
         .context("Failed to connect to mpv")?;
 
     Ok((mpv, process_handle))
+}
+
+async fn relay_mpv_log_messages(mpv: Mpv) -> anyhow::Result<()> {
+    mpv.run_command_raw("request_log_messages", &["warn"])
+        .await
+        .context("Failed to subscribe to mpv log messages")?;
+
+    tokio::spawn(async move {
+        let mut events = mpv.get_event_stream().await;
+        while let Some(event) = events.next().await {
+            let Ok(Event::LogMessage {
+                prefix,
+                level,
+                text,
+            }) = event
+            else {
+                continue;
+            };
+
+            let text = text.trim_end();
+            match level {
+                EventLogMessageLevel::Fatal | EventLogMessageLevel::Error => {
+                    tracing::error!(target: "mpv", "[{prefix}] {text}")
+                }
+                EventLogMessageLevel::Warn => tracing::warn!(target: "mpv", "[{prefix}] {text}"),
+                EventLogMessageLevel::Info => tracing::info!(target: "mpv", "[{prefix}] {text}"),
+                _ => tracing::debug!(target: "mpv", "[{prefix}] {text}"),
+            }
+        }
+    });
+
+    Ok(())
 }
 
 async fn connect_to_running_mpv(socket_path: &str) -> anyhow::Result<Mpv> {
@@ -124,7 +158,7 @@ async fn connect_to_running_mpv(socket_path: &str) -> anyhow::Result<Mpv> {
 pub async fn connect_to_mpv(mpv_config: &mut MpvConfig) -> anyhow::Result<(Mpv, Option<Child>)> {
     tracing::debug!("Connecting to mpv");
 
-    if mpv_config.should_auto_start() {
+    let (mpv, process_handle) = if mpv_config.should_auto_start() {
         mpv_config.materialize_config_file()?;
         let config_file = mpv_config
             .resolved_config_file
@@ -133,15 +167,19 @@ pub async fn connect_to_mpv(mpv_config: &mut MpvConfig) -> anyhow::Result<(Mpv, 
 
         let (mpv, process_handle) =
             spawn_mpv(mpv_config.executable_path.as_deref(), config_file).await?;
-        Ok((mpv, Some(process_handle)))
+        (mpv, Some(process_handle))
     } else {
         let socket_path = mpv_config
             .socket_path
             .as_deref()
             .expect("validated at config load time");
         let mpv = connect_to_running_mpv(socket_path).await?;
-        Ok((mpv, None))
-    }
+        (mpv, None)
+    };
+
+    relay_mpv_log_messages(mpv.clone()).await?;
+
+    Ok((mpv, process_handle))
 }
 
 pub async fn show_grzegorz_image(mpv: Mpv) -> anyhow::Result<()> {
