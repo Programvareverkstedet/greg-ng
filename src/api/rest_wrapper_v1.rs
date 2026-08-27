@@ -13,8 +13,9 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 use utoipa_swagger_ui::SwaggerUi;
 
 use super::base;
+use crate::util::{YtDlpCookies, YtDlpCookiesState};
 
-pub fn rest_api_routes(mpv: Mpv) -> Router {
+pub fn rest_api_routes(mpv: Mpv, yt_dlp_cookies: YtDlpCookiesState) -> Router {
     Router::new()
         .route("/load", post(loadfile))
         .route("/play", get(play_get))
@@ -33,9 +34,12 @@ pub fn rest_api_routes(mpv: Mpv) -> Router {
         .route("/playlist/loop", get(playlist_get_looping))
         .route("/playlist/loop", post(playlist_set_looping))
         .with_state(mpv)
+        .route("/yt-dlp-cookies", get(yt_dlp_cookies_get))
+        .route("/yt-dlp-cookies", post(yt_dlp_cookies_set))
+        .with_state(yt_dlp_cookies)
 }
 
-pub fn rest_api_docs(mpv: Mpv) -> Router {
+pub fn rest_api_docs(mpv: Mpv, yt_dlp_cookies: YtDlpCookiesState) -> Router {
     let (router, api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(loadfile))
         .routes(routes!(play_get, play_set))
@@ -49,6 +53,8 @@ pub fn rest_api_docs(mpv: Mpv) -> Router {
         .routes(routes!(playlist_get_looping, playlist_set_looping))
         .routes(routes!(shuffle))
         .with_state(mpv)
+        .routes(routes!(yt_dlp_cookies_get, yt_dlp_cookies_set))
+        .with_state(yt_dlp_cookies)
         .split_for_parts();
 
     router.merge(SwaggerUi::new("/docs").url("/docs/openapi.json", api))
@@ -400,4 +406,33 @@ async fn playlist_set_looping(
     Query(query): Query<PlaylistSetLoopingArgs>,
 ) -> RestResponse {
     base::playlist_set_looping(mpv, query.r#loop).await.into()
+}
+
+/// Get the current yt-dlp cookies
+#[utoipa::path(
+    get,
+    path = "/yt-dlp-cookies",
+    responses(
+        (status = 200, description = "Success", body = YtDlpCookies),
+    )
+)]
+async fn yt_dlp_cookies_get(State(state): State<YtDlpCookiesState>) -> Json<YtDlpCookies> {
+    Json(state.get())
+}
+
+/// Set the yt-dlp cookies
+#[utoipa::path(
+    post,
+    path = "/yt-dlp-cookies",
+    request_body = String,
+    responses(
+        (status = 200, description = "Success", body = YtDlpCookies),
+        (status = 500, description = "Internal server error"),
+    )
+)]
+async fn yt_dlp_cookies_set(State(state): State<YtDlpCookiesState>, body: String) -> Response {
+    match state.set(body) {
+        Ok(value) => Json(value).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
 }

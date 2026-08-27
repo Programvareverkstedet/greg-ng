@@ -108,6 +108,8 @@ in
             );
           in "${lib.getExe cfg.package} --systemd --config ${configFile}";
 
+          CacheDirectory = "greg-ng";
+
           Restart = "always";
           RestartSec = 3;
           WatchdogSec = lib.mkDefault 15;

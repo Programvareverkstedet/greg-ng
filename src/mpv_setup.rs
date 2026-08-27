@@ -65,6 +65,7 @@ fn create_mpv_ipc_socketpair() -> anyhow::Result<(tokio::net::UnixStream, OwnedF
 async fn spawn_mpv(
     executable_path: Option<&str>,
     config_file: &NamedTempFile,
+    ytdlp_cookies_path: &Path,
 ) -> anyhow::Result<(Mpv, Child)> {
     let (tx, rx) = create_mpv_ipc_socketpair()?;
 
@@ -90,6 +91,10 @@ async fn spawn_mpv(
         .arg(format!(
             "--include={}",
             config_file.path().to_string_lossy()
+        ))
+        .arg(format!(
+            "--ytdl-raw-options=cookies={}",
+            ytdlp_cookies_path.to_string_lossy()
         ))
         .arg("--load-unsafe-playlists")
         .arg("--keep-open") // Keep last frame of video on end of video
@@ -155,7 +160,10 @@ async fn connect_to_running_mpv(socket_path: &str) -> anyhow::Result<Mpv> {
         .context(format!("Failed to connect to mpv socket: {}", socket_path))
 }
 
-pub async fn connect_to_mpv(mpv_config: &mut MpvConfig) -> anyhow::Result<(Mpv, Option<Child>)> {
+pub async fn connect_to_mpv(
+    mpv_config: &mut MpvConfig,
+    ytdlp_cookies_path: &Path,
+) -> anyhow::Result<(Mpv, Option<Child>)> {
     tracing::debug!("Connecting to mpv");
 
     let (mpv, process_handle) = if mpv_config.should_auto_start() {
@@ -165,8 +173,12 @@ pub async fn connect_to_mpv(mpv_config: &mut MpvConfig) -> anyhow::Result<(Mpv, 
             .as_ref()
             .expect("config file was just materialized");
 
-        let (mpv, process_handle) =
-            spawn_mpv(mpv_config.executable_path.as_deref(), config_file).await?;
+        let (mpv, process_handle) = spawn_mpv(
+            mpv_config.executable_path.as_deref(),
+            config_file,
+            ytdlp_cookies_path,
+        )
+        .await?;
         (mpv, Some(process_handle))
     } else {
         let socket_path = mpv_config
@@ -178,6 +190,16 @@ pub async fn connect_to_mpv(mpv_config: &mut MpvConfig) -> anyhow::Result<(Mpv, 
     };
 
     relay_mpv_log_messages(mpv.clone()).await?;
+
+    if let Err(e) = mpv
+        .set_property(
+            "ytdl-raw-options",
+            format!("cookies={}", ytdlp_cookies_path.to_string_lossy()),
+        )
+        .await
+    {
+        tracing::warn!("Failed to set yt-dlp cookies path on mpv: {e}");
+    }
 
     Ok((mpv, process_handle))
 }

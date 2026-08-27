@@ -26,24 +26,27 @@ use tokio::{
     sync::{mpsc, watch},
 };
 
-use crate::util::{ConnectionEvent, IdPool};
+use crate::util::{ConnectionEvent, IdPool, YtDlpCookies, YtDlpCookiesState};
 
 #[derive(Debug, Clone)]
 struct WebsocketState {
     mpv: Mpv,
     id_pool: Arc<Mutex<IdPool>>,
     connection_counter_tx: mpsc::Sender<ConnectionEvent>,
+    yt_dlp_cookies: YtDlpCookiesState,
 }
 
 pub fn websocket_api(
     mpv: Mpv,
     id_pool: Arc<Mutex<IdPool>>,
     connection_counter_tx: mpsc::Sender<ConnectionEvent>,
+    yt_dlp_cookies: YtDlpCookiesState,
 ) -> Router {
     let state = WebsocketState {
         mpv,
         id_pool,
         connection_counter_tx,
+        yt_dlp_cookies,
     };
     Router::new()
         .route("/", any(websocket_handler))
@@ -57,6 +60,7 @@ async fn websocket_handler(
         mpv,
         id_pool,
         connection_counter_tx,
+        yt_dlp_cookies,
     }): State<WebsocketState>,
 ) -> impl IntoResponse {
     let mpv = mpv.clone();
@@ -69,7 +73,15 @@ async fn websocket_handler(
     };
 
     ws.on_upgrade(move |socket| {
-        handle_connection(socket, addr, mpv, id, id_pool, connection_counter_tx)
+        handle_connection(
+            socket,
+            addr,
+            mpv,
+            id,
+            id_pool,
+            connection_counter_tx,
+            yt_dlp_cookies,
+        )
     })
 }
 
@@ -88,9 +100,14 @@ pub struct InitialState {
     pub playlist: Playlist,
     pub tracks: Vec<Value>,
     pub volume: f64,
+    pub yt_dlp_cookies: YtDlpCookies,
 }
 
-async fn get_initial_state(mpv: &Mpv, id_pool: Arc<Mutex<IdPool>>) -> InitialState {
+async fn get_initial_state(
+    mpv: &Mpv,
+    id_pool: Arc<Mutex<IdPool>>,
+    yt_dlp_cookies: &YtDlpCookiesState,
+) -> InitialState {
     let cached_timestamp = mpv
         .get_property_value("demuxer-cache-state")
         .await
@@ -153,6 +170,7 @@ async fn get_initial_state(mpv: &Mpv, id_pool: Arc<Mutex<IdPool>>) -> InitialSta
         playlist,
         tracks,
         volume,
+        yt_dlp_cookies: yt_dlp_cookies.get(),
     }
 }
 
@@ -193,6 +211,7 @@ async fn handle_connection(
     channel_id: u64,
     id_pool: Arc<Mutex<IdPool>>,
     connection_counter_tx: mpsc::Sender<ConnectionEvent>,
+    yt_dlp_cookies: YtDlpCookiesState,
 ) {
     match connection_counter_tx.send(ConnectionEvent::Connected).await {
         Ok(()) => {
@@ -207,7 +226,7 @@ async fn handle_connection(
     //       This could lead to missing events if they happen in that gap. Send initial state, but also ensure
     //       that there is an additional "initial state" sent upon subscription to all properties to ensure that
     //       the state is correct.
-    let initial_state = get_initial_state(&mpv, id_pool.clone()).await;
+    let initial_state = get_initial_state(&mpv, id_pool.clone(), &yt_dlp_cookies).await;
 
     let message = Message::Text(
         json!({
@@ -223,6 +242,7 @@ async fn handle_connection(
     setup_default_subscribes(&mpv, channel_id).await.unwrap();
 
     let id_count_watch_receiver = id_pool.lock().unwrap().get_id_count_watch_receiver();
+    let yt_dlp_cookies_watch_receiver = yt_dlp_cookies.subscribe();
 
     let connection_loop_result = tokio::spawn(connection_loop(
         socket,
@@ -230,6 +250,7 @@ async fn handle_connection(
         mpv.clone(),
         channel_id,
         id_count_watch_receiver,
+        yt_dlp_cookies_watch_receiver,
     ));
 
     match connection_loop_result.await {
@@ -285,6 +306,7 @@ async fn connection_loop(
     mpv: Mpv,
     channel_id: u64,
     mut id_count_watch_receiver: watch::Receiver<u64>,
+    mut yt_dlp_cookies_watch_receiver: watch::Receiver<YtDlpCookies>,
 ) -> Result<(), anyhow::Error> {
     let mut event_stream = mpv.get_event_stream().await;
     loop {
@@ -297,6 +319,19 @@ async fn connection_loop(
                 let message = Message::Text(json!({
                     "type": "connection_count",
                     "value": id_count_watch_receiver.borrow().clone(),
+                }).to_string().into(),);
+
+                socket.send(message).await?;
+            }
+
+            yt_dlp_cookies = yt_dlp_cookies_watch_receiver.changed() => {
+                if let Err(e) = yt_dlp_cookies {
+                    anyhow::bail!("Error reading yt-dlp cookies watch receiver for {:?}: {:?}", addr, e);
+                }
+
+                let message = Message::Text(json!({
+                    "type": "yt_dlp_cookies",
+                    "value": yt_dlp_cookies_watch_receiver.borrow().clone(),
                 }).to_string().into(),);
 
                 socket.send(message).await?;

@@ -10,7 +10,10 @@ use std::{
 };
 use tokio::{sync::mpsc, task::JoinHandle};
 use tracing_subscriber::layer::SubscriberExt;
-use util::{ConnectionEvent, HealthCheckRegistry, HealthCheckRequest, IdPool};
+use util::{
+    ConnectionEvent, HealthCheckRegistry, HealthCheckRequest, IdPool, YtDlpCookiesState,
+    default_cookies_path,
+};
 
 mod api;
 mod config;
@@ -278,7 +281,8 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!("Running without systemd integration");
     }
 
-    let (mpv, proc) = connect_to_mpv(&mut config.mpv)
+    let cookies_path = default_cookies_path();
+    let (mpv, proc) = connect_to_mpv(&mut config.mpv, &cookies_path)
         .await
         .context("Failed to connect to mpv")?;
 
@@ -314,15 +318,24 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Starting API on {}", socket_addr);
 
     let id_pool = Arc::new(Mutex::new(IdPool::new_with_max_limit(1024)));
+    let yt_dlp_cookies = YtDlpCookiesState::load(cookies_path);
 
     let app = Router::new()
-        .nest("/api", api::rest_api_routes(mpv.clone()))
+        .nest(
+            "/api",
+            api::rest_api_routes(mpv.clone(), yt_dlp_cookies.clone()),
+        )
         .nest(
             "/ws",
-            api::websocket_api(mpv.clone(), id_pool.clone(), connection_counter_tx.clone()),
+            api::websocket_api(
+                mpv.clone(),
+                id_pool.clone(),
+                connection_counter_tx.clone(),
+                yt_dlp_cookies.clone(),
+            ),
         )
         .merge(api::health_routes(health_checks))
-        .merge(api::rest_api_docs(mpv.clone()))
+        .merge(api::rest_api_docs(mpv.clone(), yt_dlp_cookies))
         .into_make_service_with_connect_info::<SocketAddr>();
 
     let listener = match tokio::net::TcpListener::bind(&socket_addr)
