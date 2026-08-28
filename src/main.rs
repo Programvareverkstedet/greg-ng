@@ -8,7 +8,11 @@ use std::{
     net::{IpAddr, SocketAddr},
     sync::{Arc, Mutex},
 };
-use tokio::{sync::mpsc, task::JoinHandle};
+use tokio::{
+    signal::unix,
+    sync::{mpsc, oneshot},
+    task::JoinHandle,
+};
 use tracing_subscriber::{Layer, filter::FilterExt, layer::SubscriberExt};
 use util::{
     ConnectionEvent, HealthCheckRegistry, HealthCheckRequest, IdPool, YtDlpCookiesState,
@@ -292,7 +296,57 @@ async fn start_status_notifier_thread(
     Ok(handle)
 }
 
-async fn shutdown(mpv: Mpv, proc: Option<tokio::process::Child>) {
+// Owns the mpv process and supervises it.
+// Will kill it on request and notify anyone else if it unexpectedly exits.
+async fn run_mpv_supervisor(
+    mut proc: tokio::process::Child,
+    exited_tx: oneshot::Sender<()>,
+    mut kill_rx: mpsc::Receiver<oneshot::Sender<()>>,
+) {
+    tokio::select! {
+        status = proc.wait() => {
+            match status {
+                Ok(status) => tracing::warn!("mpv process exited with status: {status}"),
+                Err(e) => tracing::warn!("Failed to wait on mpv process: {e}"),
+            }
+            let _ = exited_tx.send(());
+        }
+        Some(ack) = kill_rx.recv() => {
+            if let Err(e) = proc.kill().await {
+                tracing::warn!("Failed to kill mpv process: {e}");
+            }
+            let _ = exited_tx.send(());
+            let _ = ack.send(());
+        }
+    }
+}
+
+async fn shutdown_signal_handler(
+    mut sigint: unix::Signal,
+    mut sigterm: unix::Signal,
+    mpv_exited_rx: Option<oneshot::Receiver<()>>,
+    status_notifier_thread_handle: JoinHandle<()>,
+) {
+    let mpv_exited = async {
+        match mpv_exited_rx {
+            Some(rx) => {
+                let _ = rx.await;
+            }
+            None => std::future::pending().await,
+        }
+    };
+
+    tokio::select! {
+        _ = sigint.recv() => tracing::info!("Received SIGINT, shutting down"),
+        _ = sigterm.recv() => tracing::info!("Received SIGTERM, shutting down"),
+        () = mpv_exited => tracing::info!("mpv process exited, shutting down"),
+        result = status_notifier_thread_handle => {
+            tracing::warn!("Status notifier thread exited unexpectedly: {result:?}");
+        }
+    }
+}
+
+async fn shutdown(mpv: Mpv, mpv_kill_tx: Option<mpsc::Sender<oneshot::Sender<()>>>) {
     tracing::info!("Shutting down");
     sd_notify::notify(&[sd_notify::NotifyState::Stopping]).unwrap_or_else(|e| {
         tracing::warn!(
@@ -304,10 +358,12 @@ async fn shutdown(mpv: Mpv, proc: Option<tokio::process::Child>) {
     mpv.disconnect()
         .await
         .unwrap_or_else(|e| tracing::warn!("Failed to disconnect from mpv: {}", e));
-    if let Some(mut proc) = proc {
-        proc.kill()
-            .await
-            .unwrap_or_else(|e| tracing::warn!("Failed to kill mpv process: {}", e));
+
+    if let Some(kill_tx) = mpv_kill_tx {
+        let (ack_tx, ack_rx) = oneshot::channel();
+        if kill_tx.send(ack_tx).await.is_ok() {
+            let _ = ack_rx.await;
+        }
     }
 }
 
@@ -358,6 +414,15 @@ async fn main() -> anyhow::Result<()> {
     let (mpv, proc) = connect_to_mpv(&mut config.mpv, &cookies_path, args.headless)
         .await
         .context("Failed to connect to mpv")?;
+    let (mpv_exited_rx, mpv_kill_tx) = match proc {
+        Some(proc) => {
+            let (exited_tx, exited_rx) = oneshot::channel();
+            let (kill_tx, kill_rx) = mpsc::channel::<oneshot::Sender<()>>(1);
+            tokio::spawn(run_mpv_supervisor(proc, exited_tx, kill_rx));
+            (Some(exited_rx), Some(kill_tx))
+        }
+        None => (None, None),
+    };
 
     let health_checks = HealthCheckRegistry::new();
     let mpv_health_check_rx = health_checks.register("mpv-ipc");
@@ -383,7 +448,7 @@ async fn main() -> anyhow::Result<()> {
         Ok(addr) => addr,
         Err(e) => {
             tracing::error!("{}", e);
-            shutdown(mpv, proc).await;
+            shutdown(mpv, mpv_kill_tx).await;
             return Err(e);
         }
     };
@@ -418,15 +483,15 @@ async fn main() -> anyhow::Result<()> {
         Ok(listener) => listener,
         Err(e) => {
             tracing::error!("{}", e);
-            shutdown(mpv, proc).await;
+            shutdown(mpv, mpv_kill_tx).await;
             return Err(e);
         }
     };
 
-    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-        .context("Failed to install SIGTERM handler")?;
-    let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
-        .context("Failed to install SIGINT handler")?;
+    let sigterm =
+        unix::signal(unix::SignalKind::terminate()).context("Failed to install SIGTERM handler")?;
+    let sigint =
+        unix::signal(unix::SignalKind::interrupt()).context("Failed to install SIGINT handler")?;
 
     if args.systemd {
         match sd_notify::notify(&[sd_notify::NotifyState::Ready])
@@ -435,59 +500,24 @@ async fn main() -> anyhow::Result<()> {
             Ok(_) => tracing::trace!("Notified systemd that the service is ready"),
             Err(e) => {
                 tracing::error!("{}", e);
-                shutdown(mpv, proc).await;
+                shutdown(mpv, mpv_kill_tx).await;
                 return Err(e);
             }
         }
     }
 
-    if let Some(mut proc) = proc {
-        tokio::select! {
-            exit_status = proc.wait() => {
-                tracing::warn!("mpv process exited with status: {}", exit_status?);
-                shutdown(mpv, Some(proc)).await;
-            }
-            _ = sigint.recv() => {
-                tracing::info!("Received SIGINT, exiting");
-                shutdown(mpv, Some(proc)).await;
-            }
-            _ = sigterm.recv() => {
-                tracing::info!("Received SIGTERM, exiting");
-                shutdown(mpv, Some(proc)).await;
-            }
-            result = axum::serve(listener, app) => {
-              tracing::info!("API server exited");
-              shutdown(mpv, Some(proc)).await;
-              result?;
-            }
-            result = status_notifier_thread_handle => {
-              tracing::info!("Status notifier thread exited unexpectedly, shutting dow");
-              shutdown(mpv, Some(proc)).await;
-              result?;
-            }
-        }
-    } else {
-        tokio::select! {
-            _ = sigint.recv() => {
-                tracing::info!("Received SIGINT, exiting");
-                shutdown(mpv.clone(), None).await;
-            }
-            _ = sigterm.recv() => {
-                tracing::info!("Received SIGTERM, exiting");
-                shutdown(mpv.clone(), None).await;
-            }
-            result = axum::serve(listener, app) => {
-              tracing::info!("API server exited");
-              shutdown(mpv.clone(), None).await;
-              result?;
-            }
-            result = status_notifier_thread_handle => {
-              tracing::info!("Status notifier thread exited unexpectedly, shutting down");
-              shutdown(mpv.clone(), None).await;
-              result?;
-            }
-        }
-    }
+    let result = axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal_handler(
+            sigint,
+            sigterm,
+            mpv_exited_rx,
+            status_notifier_thread_handle,
+        ))
+        .await;
+
+    tracing::info!("API server exited");
+    shutdown(mpv, mpv_kill_tx).await;
+    result.context("API server error")?;
 
     Ok(())
 }
