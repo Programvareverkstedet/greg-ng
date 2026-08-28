@@ -210,8 +210,16 @@ pub async fn connect_to_mpv(
     Ok((mpv, process_handle))
 }
 
+fn the_man_png_path() -> std::path::PathBuf {
+    if let Some(runtime_dir) = std::env::var_os("RUNTIME_DIRECTORY") {
+        return std::path::PathBuf::from(runtime_dir).join("the_man.png");
+    }
+
+    std::env::temp_dir().join("the_man.png")
+}
+
 pub async fn show_grzegorz_image(mpv: Mpv) -> anyhow::Result<()> {
-    let path = std::env::temp_dir().join("the_man.png");
+    let path = the_man_png_path();
     std::fs::write(path.as_path(), THE_MAN_PNG)?;
 
     mpv.playlist_clear().await?;

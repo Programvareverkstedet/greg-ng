@@ -109,6 +109,7 @@ in
           in "${lib.getExe cfg.package} --systemd --config ${configFile}";
 
           CacheDirectory = "greg-ng";
+          RuntimeDirectory = "greg-ng";
 
           Restart = "always";
           RestartSec = 3;
