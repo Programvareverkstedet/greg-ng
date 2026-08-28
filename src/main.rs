@@ -179,11 +179,26 @@ async fn start_status_notifier_thread(
         tracing::debug!("Starting systemd notifier thread");
         let mut event_stream = mpv.get_event_stream().await;
 
-        mpv.observe_property(100, "media-title").await.unwrap();
-        mpv.observe_property(100, "pause").await.unwrap();
+        if let Err(e) = mpv.observe_property(100, "media-title").await {
+            tracing::warn!("Failed to observe media-title property: {}", e);
+        }
+        if let Err(e) = mpv.observe_property(100, "pause").await {
+            tracing::warn!("Failed to observe pause property: {}", e);
+        }
 
-        let mut current_song: Option<String> = mpv.get_property("media-title").await.unwrap();
-        let mut playing = !mpv.get_property("pause").await.unwrap().unwrap_or(false);
+        let mut current_song: Option<String> =
+            mpv.get_property("media-title").await.unwrap_or_else(|e| {
+                tracing::warn!("Failed to get media-title property: {}", e);
+                None
+            });
+        let mut playing = !mpv
+            .get_property("pause")
+            .await
+            .unwrap_or_else(|e| {
+                tracing::warn!("Failed to get pause property: {}", e);
+                None
+            })
+            .unwrap_or(false);
         let mut connection_count = 0;
         let mut play_count = 0;
 
