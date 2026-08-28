@@ -201,40 +201,64 @@ async fn start_status_notifier_thread(
 
         loop {
             tokio::select! {
-                Some(Ok(Event::PropertyChange { name, data, .. })) = event_stream.next() => {
-                    match (name.as_str(), data) {
-                        ("media-title", Some(MpvDataType::String(s))) => {
-                            if current_song.as_deref() != Some(s.as_str()) {
-                                play_count += 1;
-                                tracing::info!("Now playing: {}", s);
+                event = event_stream.next() => {
+                    match event {
+                        Some(Ok(Event::PropertyChange { name, data, .. })) => {
+                            match (name.as_str(), data) {
+                                ("media-title", Some(MpvDataType::String(s))) => {
+                                    if current_song.as_deref() != Some(s.as_str()) {
+                                        play_count += 1;
+                                        tracing::info!("Now playing: {}", s);
+                                    }
+                                    current_song = Some(s);
+                                }
+                                ("media-title", None) => {
+                                    if current_song.is_some() {
+                                        tracing::info!("Stopped playback");
+                                    }
+                                    current_song = None;
+                                }
+                                ("pause", Some(MpvDataType::Bool(b))) => {
+                                    let now_playing = !b;
+                                    if playing != now_playing {
+                                        tracing::info!("{}", if now_playing { "Resumed playback" } else { "Paused playback" });
+                                    }
+                                    playing = now_playing;
+                                }
+                                (event_name, _) => {
+                                    tracing::trace!(
+                                        "Received unexpected property change on systemd notifier thread: {}",
+                                        event_name
+                                    );
+                                }
                             }
-                            current_song = Some(s);
+
+                            send_play_status(systemd, playing, &current_song, connection_count, play_count);
                         }
-                        ("media-title", None) => {
-                            if current_song.is_some() {
-                                tracing::info!("Stopped playback");
-                            }
-                            current_song = None;
-                        }
-                        ("pause", Some(MpvDataType::Bool(b))) => {
-                            let now_playing = !b;
-                            if playing != now_playing {
-                                tracing::info!("{}", if now_playing { "Resumed playback" } else { "Paused playback" });
-                            }
-                            playing = now_playing;
-                        }
-                        (event_name, _) => {
+                        Some(Ok(other)) => {
                             tracing::trace!(
-                                "Received unexpected property change on systemd notifier thread: {}",
-                                event_name
+                                "Received unexpected event on systemd notifier thread: {:?}",
+                                other
                             );
                         }
+                        Some(Err(e)) => {
+                            tracing::warn!(
+                                "Error reading event stream on systemd notifier thread: {}",
+                                e
+                            );
+                        }
+                        None => {
+                            tracing::debug!("Event stream ended on systemd notifier thread");
+                        }
                     }
-
-                    send_play_status(systemd, playing, &current_song, connection_count, play_count)
                 }
 
-                Some(connection_counter_update) = connection_counter_rx.recv() => {
+                connection_counter_update = connection_counter_rx.recv() => {
+                    let Some(connection_counter_update) = connection_counter_update else {
+                        tracing::debug!("Connection counter channel closed on systemd notifier thread");
+                        continue;
+                    };
+
                     tracing::trace!("Received connection counter update: {}", connection_counter_update);
 
                     match connection_count.checked_add_signed(connection_counter_update.to_i8().into()) {
