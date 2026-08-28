@@ -66,6 +66,7 @@ async fn spawn_mpv(
     executable_path: Option<&str>,
     config_file: &NamedTempFile,
     ytdlp_cookies_path: &Path,
+    headless: bool,
 ) -> anyhow::Result<(Mpv, Child)> {
     let (tx, rx) = create_mpv_ipc_socketpair()?;
 
@@ -77,8 +78,11 @@ async fn spawn_mpv(
     let process_handle = Command::new(executable_path.unwrap_or("mpv"))
         .arg(format!("--input-ipc-client=fd://{}", rx.as_raw_fd()))
         .arg("--idle")
-        .arg("--force-window")
-        .arg("--fullscreen")
+        .args(if headless {
+            vec!["--vo=null"]
+        } else {
+            vec!["--force-window", "--fullscreen"]
+        })
         .arg("--no-config")
         .arg("--no-terminal")
         .arg("--ytdl=yes")
@@ -163,6 +167,7 @@ async fn connect_to_running_mpv(socket_path: &str) -> anyhow::Result<Mpv> {
 pub async fn connect_to_mpv(
     mpv_config: &mut MpvConfig,
     ytdlp_cookies_path: &Path,
+    headless: bool,
 ) -> anyhow::Result<(Mpv, Option<Child>)> {
     tracing::debug!("Connecting to mpv");
 
@@ -177,6 +182,7 @@ pub async fn connect_to_mpv(
             mpv_config.executable_path.as_deref(),
             config_file,
             ytdlp_cookies_path,
+            headless,
         )
         .await?;
         (mpv, Some(process_handle))

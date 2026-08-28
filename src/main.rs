@@ -78,6 +78,12 @@ struct Args {
     /// Enable systemd integration (watchdog, status updates, native logging, etc.)
     #[clap(long, action)]
     systemd: bool,
+
+    /// Spawn mpv without a visible window.
+    ///
+    /// Mostly useful for testing, this won't affect external mpv instances connected by socket.
+    #[clap(long, action)]
+    headless: bool,
 }
 
 /// Helper function to resolve a hostname to an IP address.
@@ -302,9 +308,8 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let cookies_path = default_cookies_path();
-    ensure_cookies_file_exists(&cookies_path)
-        .context("Failed to create yt-dlp cookies file")?;
-    let (mpv, proc) = connect_to_mpv(&mut config.mpv, &cookies_path)
+    ensure_cookies_file_exists(&cookies_path).context("Failed to create yt-dlp cookies file")?;
+    let (mpv, proc) = connect_to_mpv(&mut config.mpv, &cookies_path, args.headless)
         .await
         .context("Failed to connect to mpv")?;
 
