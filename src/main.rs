@@ -9,7 +9,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 use tokio::{sync::mpsc, task::JoinHandle};
-use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::{Layer, filter::FilterExt, layer::SubscriberExt};
 use util::{
     ConnectionEvent, HealthCheckRegistry, HealthCheckRequest, IdPool, YtDlpCookiesState,
     default_cookies_path, ensure_cookies_file_exists,
@@ -322,9 +322,23 @@ async fn main() -> anyhow::Result<()> {
         let filter = tracing_subscriber::EnvFilter::builder()
             .with_default_directive(log_level.into())
             .from_env_lossy();
+
+        let is_mpv = tracing_subscriber::filter::filter_fn(|meta| meta.target() == "mpv");
+        let mpv_layer = tracing_subscriber::fmt::layer()
+            .with_target(true)
+            .with_file(true)
+            .with_line_number(true)
+            .with_filter(is_mpv.clone());
+        let other_layer = tracing_subscriber::fmt::layer()
+            .with_target(false)
+            .with_file(true)
+            .with_line_number(true)
+            .with_filter(is_mpv.not());
+
         let subscriber = tracing_subscriber::Registry::default()
             .with(filter)
-            .with(tracing_subscriber::fmt::layer());
+            .with(mpv_layer)
+            .with(other_layer);
         tracing::subscriber::set_global_default(subscriber)
             .context("Failed to set global default tracing subscriber")?;
 
