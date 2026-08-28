@@ -248,15 +248,16 @@ async fn start_status_notifier_thread(
                             );
                         }
                         None => {
-                            tracing::debug!("Event stream ended on systemd notifier thread");
+                            tracing::debug!("Event stream ended on systemd notifier thread, stopping");
+                            break;
                         }
                     }
                 }
 
                 connection_counter_update = connection_counter_rx.recv() => {
                     let Some(connection_counter_update) = connection_counter_update else {
-                        tracing::debug!("Connection counter channel closed on systemd notifier thread");
-                        continue;
+                        tracing::debug!("Connection counter channel closed on systemd notifier thread, stopping");
+                        break;
                     };
 
                     tracing::trace!("Received connection counter update: {}", connection_counter_update);
