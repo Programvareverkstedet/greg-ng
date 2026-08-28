@@ -5,7 +5,8 @@ use futures::StreamExt;
 use mpv_setup::{connect_to_mpv, show_grzegorz_image};
 use mpvipc_async::{Event, Mpv, MpvDataType, MpvExt};
 use std::{
-    net::{IpAddr, SocketAddr},
+    future::Future,
+    pin::Pin,
     sync::{Arc, Mutex},
 };
 use tokio::{
@@ -22,7 +23,10 @@ use util::{
 mod api;
 mod config;
 mod mpv_setup;
+mod net;
 mod util;
+
+use net::{ApiListener, bind_listener};
 
 const fn long_version() -> &'static str {
     const DIRTY_SUFFIX: &str = match option_env!("GIT_DIRTY") {
@@ -88,18 +92,6 @@ struct Args {
     /// Mostly useful for testing, this won't affect external mpv instances connected by socket.
     #[clap(long, action)]
     headless: bool,
-}
-
-/// Helper function to resolve a hostname to an IP address.
-/// Why is this not in the standard library? >:(
-async fn resolve(host: &str) -> anyhow::Result<IpAddr> {
-    let addr = format!("{}:0", host);
-    let addresses = tokio::net::lookup_host(addr).await?;
-    addresses
-        .into_iter()
-        .find(|addr| addr.is_ipv4())
-        .map(|addr| addr.ip())
-        .ok_or_else(|| anyhow::anyhow!("Failed to resolve address"))
 }
 
 fn setup_mpv_health_check_thread(mpv: Mpv, mut requests: mpsc::Receiver<HealthCheckRequest>) {
@@ -441,20 +433,6 @@ async fn main() -> anyhow::Result<()> {
         tracing::warn!("Could not show Grzegorz image: {}", e);
     }
 
-    let addr = match resolve(&config.server.host)
-        .await
-        .context(format!("Failed to resolve address: {}", config.server.host))
-    {
-        Ok(addr) => addr,
-        Err(e) => {
-            tracing::error!("{}", e);
-            shutdown(mpv, mpv_kill_tx).await;
-            return Err(e);
-        }
-    };
-    let socket_addr = SocketAddr::new(addr, config.server.port);
-    tracing::info!("Starting API on {}", socket_addr);
-
     let id_pool = Arc::new(Mutex::new(IdPool::new_with_max_limit(1024)));
     let yt_dlp_cookies = YtDlpCookiesState::load(cookies_path);
 
@@ -474,12 +452,9 @@ async fn main() -> anyhow::Result<()> {
         )
         .merge(api::health_routes(health_checks))
         .merge(api::rest_api_docs(mpv.clone(), yt_dlp_cookies))
-        .into_make_service_with_connect_info::<SocketAddr>();
+        .into_make_service_with_connect_info::<net::ApiClientAddr>();
 
-    let listener = match tokio::net::TcpListener::bind(&socket_addr)
-        .await
-        .context(format!("Failed to bind API server to '{}'", socket_addr))
-    {
+    let listener = match bind_listener(&config.server).await {
         Ok(listener) => listener,
         Err(e) => {
             tracing::error!("{}", e);
@@ -506,14 +481,25 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    let result = axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal_handler(
-            sigint,
-            sigterm,
-            mpv_exited_rx,
-            status_notifier_thread_handle,
-        ))
-        .await;
+    let shutdown_fut: Pin<Box<dyn Future<Output = ()> + Send>> = Box::pin(shutdown_signal_handler(
+        sigint,
+        sigterm,
+        mpv_exited_rx,
+        status_notifier_thread_handle,
+    ));
+
+    let result = match listener {
+        ApiListener::Tcp(listener) => {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(shutdown_fut)
+                .await
+        }
+        ApiListener::Unix(listener) => {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(shutdown_fut)
+                .await
+        }
+    };
 
     tracing::info!("API server exited");
     shutdown(mpv, mpv_kill_tx).await;

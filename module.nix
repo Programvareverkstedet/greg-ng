@@ -96,6 +96,14 @@ in
 
   config = lib.mkMerge [
     (lib.mkIf cfg.enable {
+      systemd.user.sockets.greg-ng = {
+        description = "Socket for greg-ng, an mpv based media player";
+        wantedBy = [ "sockets.target" ];
+        socketConfig = {
+          ListenStream = "${cfg.settings.server.host}:${toString cfg.settings.server.port}";
+        };
+      };
+
       systemd.user.services.greg-ng = {
         description = "greg-ng, an mpv based media player";
         wantedBy = [ "graphical-session.target" ];
@@ -107,6 +115,8 @@ in
               lib.filterAttrsRecursive (_: v: v != null) cfg.settings
             );
           in "${lib.getExe cfg.package} --systemd --config ${configFile}";
+
+          Sockets = [ "greg-ng.socket" ];
 
           CacheDirectory = "greg-ng";
           RuntimeDirectory = "greg-ng";

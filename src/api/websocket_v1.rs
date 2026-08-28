@@ -1,7 +1,4 @@
-use std::{
-    net::SocketAddr,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 
 use anyhow::Context;
 use futures::{StreamExt, stream::FuturesUnordered};
@@ -26,6 +23,7 @@ use tokio::{
     sync::{mpsc, watch},
 };
 
+use crate::net::ApiClientAddr;
 use crate::util::{ConnectionEvent, IdPool, YtDlpCookies, YtDlpCookiesState};
 
 #[derive(Debug, Clone)]
@@ -55,7 +53,7 @@ pub fn websocket_api(
 
 async fn websocket_handler(
     ws: WebSocketUpgrade,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    ConnectInfo(addr): ConnectInfo<ApiClientAddr>,
     State(WebsocketState {
         mpv,
         id_pool,
@@ -206,7 +204,7 @@ async fn setup_default_subscribes(mpv: &Mpv, channel_id: u64) -> anyhow::Result<
 
 async fn handle_connection(
     mut socket: WebSocket,
-    addr: SocketAddr,
+    addr: ApiClientAddr,
     mpv: Mpv,
     channel_id: u64,
     id_pool: Arc<Mutex<IdPool>>,
@@ -246,7 +244,7 @@ async fn handle_connection(
 
     let connection_loop_result = tokio::spawn(connection_loop(
         socket,
-        addr,
+        addr.clone(),
         mpv.clone(),
         channel_id,
         id_count_watch_receiver,
@@ -302,7 +300,7 @@ async fn handle_connection(
 
 async fn connection_loop(
     mut socket: WebSocket,
-    addr: SocketAddr,
+    addr: ApiClientAddr,
     mpv: Mpv,
     channel_id: u64,
     mut id_count_watch_receiver: watch::Receiver<u64>,
