@@ -157,7 +157,7 @@ fn send_play_status(
         "[CONN: {}] [PLAYS: {}] {} {:?}",
         connection_count,
         play_count,
-        if playing { "[▶]" } else { "[⏸]" },
+        if playing { "▶" } else { "⏸" },
         if let Some(song) = current_song {
             song
         } else {
