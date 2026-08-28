@@ -204,17 +204,21 @@ async fn start_status_notifier_thread(
                 event = event_stream.next() => {
                     match event {
                         Some(Ok(Event::PropertyChange { name, data, .. })) => {
+                            let mut changed = false;
+
                             match (name.as_str(), data) {
                                 ("media-title", Some(MpvDataType::String(s))) => {
                                     if current_song.as_deref() != Some(s.as_str()) {
                                         play_count += 1;
                                         tracing::info!("Now playing: {}", s);
+                                        changed = true;
                                     }
                                     current_song = Some(s);
                                 }
                                 ("media-title", None) => {
                                     if current_song.is_some() {
                                         tracing::info!("Stopped playback");
+                                        changed = true;
                                     }
                                     current_song = None;
                                 }
@@ -222,6 +226,7 @@ async fn start_status_notifier_thread(
                                     let now_playing = !b;
                                     if playing != now_playing {
                                         tracing::info!("{}", if now_playing { "Resumed playback" } else { "Paused playback" });
+                                        changed = true;
                                     }
                                     playing = now_playing;
                                 }
@@ -233,7 +238,9 @@ async fn start_status_notifier_thread(
                                 }
                             }
 
-                            send_play_status(systemd, playing, &current_song, connection_count, play_count);
+                            if changed {
+                                send_play_status(systemd, playing, &current_song, connection_count, play_count);
+                            }
                         }
                         Some(Ok(other)) => {
                             tracing::trace!(
