@@ -24,10 +24,10 @@ in
           server = {
             host = lib.mkOption {
               type = lib.types.str;
-              default = "localhost";
+              default = "127.0.0.1";
               example = "0.0.0.0";
               description = ''
-                Which host to bind to.
+                Which IP address to bind to.
               '';
             };
 
