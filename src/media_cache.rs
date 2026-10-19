@@ -1,9 +1,13 @@
 mod downloader;
 mod key;
 mod lock;
+mod m3u;
 mod meta;
 mod probe;
+mod service;
 mod store;
+
+pub use service::MediaCacheService;
 
 use std::{
     path::PathBuf,
