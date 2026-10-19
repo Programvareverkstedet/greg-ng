@@ -1,6 +1,8 @@
+mod downloader;
 mod key;
 mod lock;
 mod meta;
+mod probe;
 mod store;
 
 use std::{
