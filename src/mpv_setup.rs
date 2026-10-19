@@ -101,6 +101,7 @@ async fn spawn_mpv(
             ytdlp_cookies_path.to_string_lossy()
         ))
         .arg("--load-unsafe-playlists")
+        .arg("--sub-auto=fuzzy") // Load sidecar subs from the media cache next to the media file
         .arg("--keep-open") // Keep last frame of video on end of video
         .spawn()
         .context("Failed to start mpv")?;

@@ -22,6 +22,7 @@ use util::{
 
 mod api;
 mod config;
+mod media_cache;
 mod mpv_setup;
 mod net;
 mod util;
@@ -449,12 +450,27 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let id_pool = Arc::new(Mutex::new(IdPool::new_with_max_limit(1024)));
-    let yt_dlp_cookies = YtDlpCookiesState::load(cookies_path);
+    let yt_dlp_cookies = YtDlpCookiesState::load(cookies_path.clone());
+
+    let media_cache = media_cache::MediaCacheService::start_from_config(
+        &config.media_cache,
+        &cookies_path,
+        mpv.clone(),
+    )
+    .await;
+
+    if let Some(service) = media_cache.as_ref() {
+        let media_cache_health_check_rx = health_checks.register("media-cache");
+        media_cache::MediaCacheService::spawn_health_check_thread(
+            service.clone(),
+            media_cache_health_check_rx,
+        );
+    }
 
     let app = Router::new()
         .nest(
             "/api",
-            api::rest_api_routes(mpv.clone(), yt_dlp_cookies.clone()),
+            api::rest_api_routes(mpv.clone(), yt_dlp_cookies.clone(), media_cache.clone()),
         )
         .nest(
             "/ws",
@@ -463,10 +479,11 @@ async fn main() -> anyhow::Result<()> {
                 id_pool.clone(),
                 connection_counter_tx.clone(),
                 yt_dlp_cookies.clone(),
+                media_cache.clone(),
             ),
         )
         .merge(api::health_routes(health_checks))
-        .merge(api::rest_api_docs(mpv.clone(), yt_dlp_cookies))
+        .merge(api::rest_api_docs(mpv.clone(), yt_dlp_cookies, media_cache))
         .into_make_service_with_connect_info::<net::ApiClientAddr>();
 
     let listener = match bind_listener(&config.server).await {

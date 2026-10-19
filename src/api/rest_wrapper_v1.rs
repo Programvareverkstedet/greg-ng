@@ -13,11 +13,28 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 use utoipa_swagger_ui::SwaggerUi;
 
 use super::base;
+use crate::media_cache::MediaCacheService;
 use crate::util::{YtDlpCookies, YtDlpCookiesState};
+use std::sync::Arc;
 
-pub fn rest_api_routes(mpv: Mpv, yt_dlp_cookies: YtDlpCookiesState) -> Router {
+#[derive(Clone)]
+struct MediaState {
+    mpv: Mpv,
+    media_cache: Option<Arc<MediaCacheService>>,
+}
+
+pub fn rest_api_routes(
+    mpv: Mpv,
+    yt_dlp_cookies: YtDlpCookiesState,
+    media_cache: Option<Arc<MediaCacheService>>,
+) -> Router {
+    let media_state = MediaState {
+        mpv: mpv.clone(),
+        media_cache,
+    };
     Router::new()
         .route("/load", post(loadfile))
+        .with_state(media_state)
         .route("/play", get(play_get))
         .route("/play", post(play_set))
         .route("/volume", get(volume_get))
@@ -39,13 +56,23 @@ pub fn rest_api_routes(mpv: Mpv, yt_dlp_cookies: YtDlpCookiesState) -> Router {
         .with_state(yt_dlp_cookies)
 }
 
-pub fn rest_api_docs(mpv: Mpv, yt_dlp_cookies: YtDlpCookiesState) -> Router {
+pub fn rest_api_docs(
+    mpv: Mpv,
+    yt_dlp_cookies: YtDlpCookiesState,
+    media_cache: Option<Arc<MediaCacheService>>,
+) -> Router {
+    let media_state = MediaState {
+        mpv: mpv.clone(),
+        media_cache,
+    };
     let (router, api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(loadfile))
+        .with_state(media_state)
         .routes(routes!(play_get, play_set))
         .routes(routes!(volume_get, volume_set))
         .routes(routes!(time_get, time_set))
-        .routes(routes!(playlist_get, playlist_remove_or_clear))
+        .routes(routes!(playlist_get))
+        .routes(routes!(playlist_remove_or_clear))
         .routes(routes!(playlist_next))
         .routes(routes!(playlist_previous))
         .routes(routes!(playlist_goto))
@@ -147,8 +174,13 @@ struct LoadFileArgs {
         (status = 500, description = "Internal server error", body = ErrorResponse),
     )
 )]
-async fn loadfile(State(mpv): State<Mpv>, Query(query): Query<LoadFileArgs>) -> RestResponse {
-    base::loadfile(mpv, &query.path).await.into()
+async fn loadfile(
+    State(MediaState { mpv, media_cache }): State<MediaState>,
+    Query(query): Query<LoadFileArgs>,
+) -> RestResponse {
+    base::loadfile(mpv, media_cache.as_ref(), &query.path)
+        .await
+        .into()
 }
 
 /// Check whether the player is paused or playing

@@ -1,18 +1,30 @@
+use std::sync::Arc;
+
 use mpvipc_async::{
     LoopProperty, Mpv, MpvExt, NumberChangeOptions, PlaylistAddOptions, PlaylistAddTypeOptions,
     SeekOptions, Switch,
 };
 use serde_json::{Value, json};
 
+use crate::media_cache::MediaCacheService;
+
 /// Add item to playlist
-pub async fn loadfile(mpv: Mpv, path: &str) -> anyhow::Result<()> {
+pub async fn loadfile(
+    mpv: Mpv,
+    media_cache: Option<&Arc<MediaCacheService>>,
+    path: &str,
+) -> anyhow::Result<()> {
     tracing::trace!("api::loadfile({:?})", path);
-    mpv.playlist_add(
-        path,
-        PlaylistAddTypeOptions::File,
-        PlaylistAddOptions::Append,
-    )
-    .await?;
+    if let Some(service) = media_cache {
+        service.resolve_and_load(mpv, path.to_string()).await?;
+    } else {
+        mpv.playlist_add(
+            path,
+            PlaylistAddTypeOptions::File,
+            PlaylistAddOptions::Append,
+        )
+        .await?;
+    }
 
     Ok(())
 }
@@ -93,11 +105,12 @@ pub async fn playlist_get(mpv: Mpv) -> anyhow::Result<Value> {
         .iter()
         .enumerate()
         .map(|(i, item)| {
+            let filename = item.title.clone().unwrap_or_else(|| item.filename.clone());
             json!({
               "index": i,
               "current": item.current,
               "playing": is_playing,
-              "filename": item.title.as_ref().unwrap_or(&item.filename),
+              "filename": filename,
               "data": {
                 "fetching": true,
               }

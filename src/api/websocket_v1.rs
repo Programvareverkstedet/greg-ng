@@ -13,16 +13,14 @@ use axum::{
     response::IntoResponse,
     routing::any,
 };
-use mpvipc_async::{
-    LoopProperty, Mpv, MpvExt, NumberChangeOptions, Playlist, PlaylistAddTypeOptions, SeekOptions,
-    Switch,
-};
+use mpvipc_async::{LoopProperty, Mpv, MpvExt, NumberChangeOptions, Playlist, SeekOptions, Switch};
 use serde_json::{Value, json};
 use tokio::{
     select,
     sync::{mpsc, watch},
 };
 
+use crate::media_cache::MediaCacheService;
 use crate::net::ApiClientAddr;
 use crate::util::{ConnectionEvent, IdPool, YtDlpCookies, YtDlpCookiesState};
 
@@ -32,6 +30,7 @@ struct WebsocketState {
     id_pool: Arc<Mutex<IdPool>>,
     connection_counter_tx: mpsc::Sender<ConnectionEvent>,
     yt_dlp_cookies: YtDlpCookiesState,
+    media_cache: Option<Arc<MediaCacheService>>,
 }
 
 pub fn websocket_api(
@@ -39,12 +38,14 @@ pub fn websocket_api(
     id_pool: Arc<Mutex<IdPool>>,
     connection_counter_tx: mpsc::Sender<ConnectionEvent>,
     yt_dlp_cookies: YtDlpCookiesState,
+    media_cache: Option<Arc<MediaCacheService>>,
 ) -> Router {
     let state = WebsocketState {
         mpv,
         id_pool,
         connection_counter_tx,
         yt_dlp_cookies,
+        media_cache,
     };
     Router::new()
         .route("/", any(websocket_handler))
@@ -59,6 +60,7 @@ async fn websocket_handler(
         id_pool,
         connection_counter_tx,
         yt_dlp_cookies,
+        media_cache,
     }): State<WebsocketState>,
 ) -> impl IntoResponse {
     let mpv = mpv.clone();
@@ -79,6 +81,7 @@ async fn websocket_handler(
             id_pool,
             connection_counter_tx,
             yt_dlp_cookies,
+            media_cache,
         )
     })
 }
@@ -202,6 +205,7 @@ async fn setup_default_subscribes(mpv: &Mpv, channel_id: u64) -> anyhow::Result<
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_connection(
     mut socket: WebSocket,
     addr: ApiClientAddr,
@@ -210,6 +214,7 @@ async fn handle_connection(
     id_pool: Arc<Mutex<IdPool>>,
     connection_counter_tx: mpsc::Sender<ConnectionEvent>,
     yt_dlp_cookies: YtDlpCookiesState,
+    media_cache: Option<Arc<MediaCacheService>>,
 ) {
     match connection_counter_tx.send(ConnectionEvent::Connected).await {
         Ok(()) => {
@@ -249,6 +254,7 @@ async fn handle_connection(
         channel_id,
         id_count_watch_receiver,
         yt_dlp_cookies_watch_receiver,
+        media_cache,
     ));
 
     match connection_loop_result.await {
@@ -305,6 +311,7 @@ async fn connection_loop(
     channel_id: u64,
     mut id_count_watch_receiver: watch::Receiver<u64>,
     mut yt_dlp_cookies_watch_receiver: watch::Receiver<YtDlpCookies>,
+    media_cache: Option<Arc<MediaCacheService>>,
 ) -> Result<(), anyhow::Error> {
     let mut event_stream = mpv.get_event_stream().await;
     loop {
@@ -385,7 +392,9 @@ async fn connection_loop(
                 tracing::trace!("Handling command from {:?}: {:?}", addr, message_json);
 
                 // TODO: handle errors
-                match handle_message(message_json, mpv.clone(), channel_id).await {
+                match handle_message(message_json, mpv.clone(), channel_id, media_cache.as_ref())
+                    .await
+                {
                     Ok(Some(response)) => {
                         tracing::trace!("Handled command from {:?} successfully, sending response", addr);
                         let message = Message::Text(json!({
@@ -450,6 +459,7 @@ async fn handle_message(
     message: Value,
     mpv: Mpv,
     _channel_id: u64,
+    media_cache: Option<&Arc<MediaCacheService>>,
 ) -> anyhow::Result<Option<Value>> {
     let command =
         serde_json::from_value::<WSCommand>(message).context("Failed to parse message")?;
@@ -467,12 +477,7 @@ async fn handle_message(
         // }
         WSCommand::Load { urls } => {
             for url in urls {
-                mpv.playlist_add(
-                    &url,
-                    PlaylistAddTypeOptions::File,
-                    mpvipc_async::PlaylistAddOptions::Append,
-                )
-                .await?;
+                super::base::loadfile(mpv.clone(), media_cache, &url).await?;
             }
             Ok(None)
         }
