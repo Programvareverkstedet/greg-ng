@@ -4,7 +4,9 @@
 , rustPlatform
 , makeWrapper
 , mpv
-, wrapped ? false
+, yt-dlp
+, ffmpeg
+, wrapped ? true
 , commitHash ? "unknown"
 , commitDate ? "unknown"
 , commitIsDirty ? false
@@ -12,7 +14,7 @@
 
 rustPlatform.buildRustPackage rec {
   pname = "greg-ng";
-  version = "0.1.0";
+  version = "0.1.1";
   src = builtins.filterSource (path: type: let
     baseName = baseNameOf (toString path);
   in !(lib.any (b: b) [
@@ -49,7 +51,7 @@ rustPlatform.buildRustPackage rec {
 
   postInstall = lib.optionalString wrapped ''
     wrapProgram $out/bin/greg-ng \
-      --prefix PATH : '${lib.makeBinPath [ mpv ]}'
+      --prefix PATH : '${lib.makeBinPath [ mpv yt-dlp ffmpeg ]}'
   '';
 
   meta = with lib; {

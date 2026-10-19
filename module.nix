@@ -89,6 +89,70 @@ in
               '';
             };
           };
+
+          media_cache = {
+            enabled = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = "Whether to cache media resolved with yt-dlp on local storage.";
+            };
+
+            directory = lib.mkOption {
+              type = with lib.types; nullOr str;
+              default = null;
+              description = "Directory holding the media cache; defaults to `$CACHE_DIRECTORY/media`.";
+            };
+
+            tmp_directory = lib.mkOption {
+              type = with lib.types; nullOr str;
+              default = null;
+              description = "Directory for in-progress downloads; defaults to `<tmp>/greg-ng-media`.";
+            };
+
+            max_size = lib.mkOption {
+              type = with lib.types; oneOf [ int str ];
+              default = -1;
+              example = "10 GiB";
+              description = "Maximum total size of cached media, e.g. `\"10 GiB\"`; `-1` means unlimited (bounded by `min_free_space`).";
+            };
+
+            min_free_space = lib.mkOption {
+              type = with lib.types; oneOf [ int str ];
+              default = "1 GiB";
+              example = 2 * 1024 * 1024 * 1024;
+              description = "Minimum free space to keep on the cache filesystem, e.g. `\"1 GiB\"`.";
+            };
+
+            format = lib.mkOption {
+              type = lib.types.str;
+              default = "bestvideo[height<=?720][vcodec!~='vp0?9']+bestaudio/bestaudio/best";
+              description = "yt-dlp format string used for downloads.";
+            };
+
+            sub_langs = lib.mkOption {
+              type = lib.types.str;
+              default = "en.*,no.*";
+              description = "Native subtitle languages to download, e.g. `\"en.*,no.*\"`.";
+            };
+
+            ytdlp_path = lib.mkOption {
+              type = lib.types.str;
+              default = "yt-dlp";
+              description = "Path to the yt-dlp executable.";
+            };
+
+            stall_timeout_secs = lib.mkOption {
+              type = lib.types.ints.positive;
+              default = 30;
+              description = "Seconds without yt-dlp output or download growth before aborting.";
+            };
+
+            max_playlist_entries = lib.mkOption {
+              type = lib.types.ints.positive;
+              default = 500;
+              description = "Bounds playlist expansion for sources reporting no total (e.g. endless mixes); finite playlists expand fully.";
+            };
+          };
         };
       };
     };

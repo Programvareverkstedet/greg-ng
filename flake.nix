@@ -35,7 +35,7 @@
     apps = forAllSystems (system: pkgs: _: {
       default = self.apps.${system}.greg-ng;
       greg-ng = let
-        package = self.packages.${system}.greg-ng-wrapped;
+        package = self.packages.${system}.greg-ng;
         format = pkgs.formats.toml { };
         configFile = format.generate "greg-ng.toml" {
           server.verbosity = "trace";
@@ -55,6 +55,7 @@
           toolchain
           pkgs.mpv
           pkgs.cargo-edit
+          pkgs.yt-dlp
         ];
 
         RUST_SRC_PATH = "${toolchain}/lib/rustlib/src/rust/library";
@@ -64,7 +65,7 @@
     overlays = {
       default = self.overlays.greg-ng;
       greg-ng = final: prev: {
-        inherit (self.packages.${prev.stdenv.hostPlatform.system}) greg-ng;
+        inherit (self.packages.${prev.stdenv.hostPlatform.system}) greg-ng greg-ng-unwrapped;
       };
     };
 
@@ -78,8 +79,8 @@
       greg-ng = pkgs.callPackage ./default.nix {
         inherit commitHash commitDate commitIsDirty;
       };
-      greg-ng-wrapped = pkgs.callPackage ./default.nix {
-        wrapped = true;
+      greg-ng-unwrapped = pkgs.callPackage ./default.nix {
+        wrapped = false;
         inherit commitHash commitDate commitIsDirty;
       };
     });
