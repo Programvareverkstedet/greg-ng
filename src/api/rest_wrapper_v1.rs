@@ -1,6 +1,6 @@
 use axum::{
     Json, Router,
-    extract::{Query, State},
+    extract::{FromRef, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{delete, get, post},
@@ -13,9 +13,28 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 use utoipa_swagger_ui::SwaggerUi;
 
 use super::base;
+use crate::ingest::IngestQueue;
 use crate::util::{YtDlpCookies, YtDlpCookiesState};
 
-pub fn rest_api_routes(mpv: Mpv, yt_dlp_cookies: YtDlpCookiesState) -> Router {
+#[derive(Clone)]
+struct AppState {
+    mpv: Mpv,
+    ingest: IngestQueue,
+}
+
+impl FromRef<AppState> for Mpv {
+    fn from_ref(state: &AppState) -> Self {
+        state.mpv.clone()
+    }
+}
+
+impl FromRef<AppState> for IngestQueue {
+    fn from_ref(state: &AppState) -> Self {
+        state.ingest.clone()
+    }
+}
+
+pub fn rest_api_routes(mpv: Mpv, ingest: IngestQueue, yt_dlp_cookies: YtDlpCookiesState) -> Router {
     Router::new()
         .route("/load", post(loadfile))
         .route("/play", get(play_get))
@@ -33,13 +52,13 @@ pub fn rest_api_routes(mpv: Mpv, yt_dlp_cookies: YtDlpCookiesState) -> Router {
         .route("/playlist/shuffle", post(shuffle))
         .route("/playlist/loop", get(playlist_get_looping))
         .route("/playlist/loop", post(playlist_set_looping))
-        .with_state(mpv)
+        .with_state(AppState { mpv, ingest })
         .route("/yt-dlp-cookies", get(yt_dlp_cookies_get))
         .route("/yt-dlp-cookies", post(yt_dlp_cookies_set))
         .with_state(yt_dlp_cookies)
 }
 
-pub fn rest_api_docs(mpv: Mpv, yt_dlp_cookies: YtDlpCookiesState) -> Router {
+pub fn rest_api_docs(mpv: Mpv, ingest: IngestQueue, yt_dlp_cookies: YtDlpCookiesState) -> Router {
     let (router, api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .routes(routes!(loadfile))
         .routes(routes!(play_get, play_set))
@@ -52,7 +71,7 @@ pub fn rest_api_docs(mpv: Mpv, yt_dlp_cookies: YtDlpCookiesState) -> Router {
         .routes(routes!(playlist_move))
         .routes(routes!(playlist_get_looping, playlist_set_looping))
         .routes(routes!(shuffle))
-        .with_state(mpv)
+        .with_state(AppState { mpv, ingest })
         .routes(routes!(yt_dlp_cookies_get, yt_dlp_cookies_set))
         .with_state(yt_dlp_cookies)
         .split_for_parts();
@@ -147,8 +166,11 @@ struct LoadFileArgs {
         (status = 500, description = "Internal server error", body = ErrorResponse),
     )
 )]
-async fn loadfile(State(mpv): State<Mpv>, Query(query): Query<LoadFileArgs>) -> RestResponse {
-    base::loadfile(mpv, &query.path).await.into()
+async fn loadfile(
+    State(ingest): State<IngestQueue>,
+    Query(query): Query<LoadFileArgs>,
+) -> RestResponse {
+    base::loadfile(ingest, &query.path).await.into()
 }
 
 /// Check whether the player is paused or playing
@@ -326,12 +348,13 @@ struct PlaylistRemoveOrClearArgs {
     )
 )]
 async fn playlist_remove_or_clear(
-    State(mpv): State<Mpv>,
+    State(state): State<AppState>,
     Query(query): Query<PlaylistRemoveOrClearArgs>,
 ) -> RestResponse {
+    let AppState { mpv, ingest } = state;
     match query.index {
         Some(index) => base::playlist_remove(mpv, index).await.into(),
-        None => base::playlist_clear(mpv).await.into(),
+        None => base::playlist_clear(ingest).await.into(),
     }
 }
 

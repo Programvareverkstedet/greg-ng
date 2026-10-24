@@ -22,6 +22,7 @@ use util::{
 
 mod api;
 mod config;
+mod ingest;
 mod mpv_setup;
 mod net;
 mod util;
@@ -449,24 +450,26 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let id_pool = Arc::new(Mutex::new(IdPool::new_with_max_limit(1024)));
-    let yt_dlp_cookies = YtDlpCookiesState::load(cookies_path);
+    let yt_dlp_cookies = YtDlpCookiesState::load(cookies_path.clone());
+    let ingest = ingest::IngestQueue::new(mpv.clone(), cookies_path);
 
     let app = Router::new()
         .nest(
             "/api",
-            api::rest_api_routes(mpv.clone(), yt_dlp_cookies.clone()),
+            api::rest_api_routes(mpv.clone(), ingest.clone(), yt_dlp_cookies.clone()),
         )
         .nest(
             "/ws",
             api::websocket_api(
                 mpv.clone(),
+                ingest.clone(),
                 id_pool.clone(),
                 connection_counter_tx.clone(),
                 yt_dlp_cookies.clone(),
             ),
         )
         .merge(api::health_routes(health_checks))
-        .merge(api::rest_api_docs(mpv.clone(), yt_dlp_cookies))
+        .merge(api::rest_api_docs(mpv.clone(), ingest, yt_dlp_cookies))
         .into_make_service_with_connect_info::<net::ApiClientAddr>();
 
     let listener = match bind_listener(&config.server).await {
