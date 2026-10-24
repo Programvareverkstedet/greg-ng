@@ -97,8 +97,6 @@ async fn get_initial_state(
         .unwrap_or(None)
         .and_then(|v| {
             v.as_object()
-                .and_then(|o| o.get("data"))
-                .and_then(|v| v.as_object())
                 .and_then(|o| o.get("cache-end"))
                 .and_then(|v| v.as_f64())
         });

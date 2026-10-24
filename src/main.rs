@@ -180,10 +180,10 @@ async fn start_status_notifier_thread(
         tracing::debug!("Starting systemd notifier thread");
         let mut event_stream = mpv.get_event_stream().await;
 
-        if let Err(e) = mpv.observe_property(100, "media-title").await {
+        if let Err(e) = mpv.observe_property(0, "media-title").await {
             tracing::warn!("Failed to observe media-title property: {}", e);
         }
-        if let Err(e) = mpv.observe_property(100, "pause").await {
+        if let Err(e) = mpv.observe_property(0, "pause").await {
             tracing::warn!("Failed to observe pause property: {}", e);
         }
 
