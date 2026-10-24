@@ -30,12 +30,36 @@
       toolchain = rust-bin.stable.latest.default.override {
         extensions = [ "rust-src" "rust-analyzer" "rust-std" ];
       };
-    in f system pkgs toolchain);
+
+      # TODO: drop override once mpv 0.42 (writable playlist/N/title) is in nixpkgs
+      mpv-pinned = pkgs.mpv.override {
+        mpv-unwrapped = pkgs.mpv-unwrapped.overrideAttrs (_: {
+          version = "unstable-2026-10-24";
+          src = pkgs.fetchFromGitHub {
+            owner = "mpv-player";
+            repo = "mpv";
+            rev = "703e59b0ecf659ba8062ecb876fb8ec25f73726f";
+            hash = "sha256-lHHQe7oOnFcFtvuo73aP77xscPfHhxUCXwfQSUpbd08=";
+          };
+          postPatch = ''
+            substituteInPlace meson.build \
+              --replace-fail "conf_data.set_quoted('CONFIGURATION', meson.build_options().strip().replace('\\\\', '\\\\\\\\'))" \
+                             "conf_data.set_quoted('CONFIGURATION', '<omitted>')"
+            echo -n unstable-2026-10-24 > MPV_VERSION
+            pushd TOOLS
+            mv mpv_identify.sh mpv_identify
+            patchShebangs *.py *.sh
+            mv mpv_identify mpv_identify.sh
+            popd
+          '';
+        });
+      };
+    in f system pkgs toolchain mpv-pinned);
   in {
     apps = forAllSystems (system: pkgs: _: {
       default = self.apps.${system}.greg-ng;
       greg-ng = let
-        package = self.packages.${system}.greg-ng-wrapped;
+        package = self.packages.${system}.greg-ng;
         format = pkgs.formats.toml { };
         configFile = format.generate "greg-ng.toml" {
           server.verbosity = "trace";
@@ -49,11 +73,12 @@
       };
     });
 
-    devShells = forAllSystems (system: pkgs: toolchain: {
+    devShells = forAllSystems (system: pkgs: toolchain: mpv-pinned: {
       default = pkgs.mkShell {
         nativeBuildInputs = [
           toolchain
-          pkgs.mpv
+          mpv-pinned
+          pkgs.yt-dlp
           pkgs.cargo-edit
         ];
 
@@ -68,7 +93,7 @@
       };
     };
 
-    packages = forAllSystems (system: pkgs: _: let
+    packages = forAllSystems (system: pkgs: _: mpv-pinned: let
       inherit (self) sourceInfo;
       commitHash = sourceInfo.rev or (lib.substring 0 40 sourceInfo.dirtyRev);
       commitDate = "${lib.substring 0 4 sourceInfo.lastModifiedDate}-${lib.substring 4 2 sourceInfo.lastModifiedDate}-${lib.substring 6 2 sourceInfo.lastModifiedDate}";
@@ -76,12 +101,14 @@
     in {
       default = self.packages.${system}.greg-ng;
       greg-ng = pkgs.callPackage ./default.nix {
+        mpv = mpv-pinned;
         inherit commitHash commitDate commitIsDirty;
       };
-      greg-ng-wrapped = pkgs.callPackage ./default.nix {
-        wrapped = true;
+      greg-ng-unwrapped = pkgs.callPackage ./default.nix {
+        wrapped = false;
         inherit commitHash commitDate commitIsDirty;
       };
+      mpv-pinned = mpv-pinned;
     });
   } // {
     nixosModules.default = ./module.nix;
