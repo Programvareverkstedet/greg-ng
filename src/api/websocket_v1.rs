@@ -13,22 +13,21 @@ use axum::{
     response::IntoResponse,
     routing::any,
 };
-use mpvipc_async::{
-    LoopProperty, Mpv, MpvExt, NumberChangeOptions, Playlist, PlaylistAddTypeOptions, SeekOptions,
-    Switch,
-};
+use mpvipc_async::{LoopProperty, Mpv, MpvExt, NumberChangeOptions, Playlist, SeekOptions, Switch};
 use serde_json::{Value, json};
 use tokio::{
     select,
     sync::{mpsc, watch},
 };
 
+use crate::ingest::IngestQueue;
 use crate::net::ApiClientAddr;
 use crate::util::{ConnectionEvent, IdPool, YtDlpCookies, YtDlpCookiesState};
 
 #[derive(Debug, Clone)]
 struct WebsocketState {
     mpv: Mpv,
+    ingest: IngestQueue,
     id_pool: Arc<Mutex<IdPool>>,
     connection_counter_tx: mpsc::Sender<ConnectionEvent>,
     yt_dlp_cookies: YtDlpCookiesState,
@@ -36,12 +35,14 @@ struct WebsocketState {
 
 pub fn websocket_api(
     mpv: Mpv,
+    ingest: IngestQueue,
     id_pool: Arc<Mutex<IdPool>>,
     connection_counter_tx: mpsc::Sender<ConnectionEvent>,
     yt_dlp_cookies: YtDlpCookiesState,
 ) -> Router {
     let state = WebsocketState {
         mpv,
+        ingest,
         id_pool,
         connection_counter_tx,
         yt_dlp_cookies,
@@ -54,15 +55,9 @@ pub fn websocket_api(
 async fn websocket_handler(
     ws: WebSocketUpgrade,
     ConnectInfo(addr): ConnectInfo<ApiClientAddr>,
-    State(WebsocketState {
-        mpv,
-        id_pool,
-        connection_counter_tx,
-        yt_dlp_cookies,
-    }): State<WebsocketState>,
+    State(state): State<WebsocketState>,
 ) -> impl IntoResponse {
-    let mpv = mpv.clone();
-    let id = match id_pool.lock().unwrap().request_id() {
+    let id = match state.id_pool.lock().unwrap().request_id() {
         Ok(id) => id,
         Err(e) => {
             tracing::error!("Failed to get id from id pool: {:?}", e);
@@ -70,17 +65,7 @@ async fn websocket_handler(
         }
     };
 
-    ws.on_upgrade(move |socket| {
-        handle_connection(
-            socket,
-            addr,
-            mpv,
-            id,
-            id_pool,
-            connection_counter_tx,
-            yt_dlp_cookies,
-        )
-    })
+    ws.on_upgrade(move |socket| handle_connection(socket, addr, state, id))
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -205,12 +190,17 @@ async fn setup_default_subscribes(mpv: &Mpv, channel_id: u64) -> anyhow::Result<
 async fn handle_connection(
     mut socket: WebSocket,
     addr: ApiClientAddr,
-    mpv: Mpv,
+    state: WebsocketState,
     channel_id: u64,
-    id_pool: Arc<Mutex<IdPool>>,
-    connection_counter_tx: mpsc::Sender<ConnectionEvent>,
-    yt_dlp_cookies: YtDlpCookiesState,
 ) {
+    let WebsocketState {
+        mpv,
+        ingest,
+        id_pool,
+        connection_counter_tx,
+        yt_dlp_cookies,
+    } = state;
+
     match connection_counter_tx.send(ConnectionEvent::Connected).await {
         Ok(()) => {
             tracing::trace!("Connection count updated for {:?}", addr);
@@ -246,6 +236,7 @@ async fn handle_connection(
         socket,
         addr.clone(),
         mpv.clone(),
+        ingest,
         channel_id,
         id_count_watch_receiver,
         yt_dlp_cookies_watch_receiver,
@@ -302,6 +293,7 @@ async fn connection_loop(
     mut socket: WebSocket,
     addr: ApiClientAddr,
     mpv: Mpv,
+    ingest: IngestQueue,
     channel_id: u64,
     mut id_count_watch_receiver: watch::Receiver<u64>,
     mut yt_dlp_cookies_watch_receiver: watch::Receiver<YtDlpCookies>,
@@ -385,7 +377,7 @@ async fn connection_loop(
                 tracing::trace!("Handling command from {:?}: {:?}", addr, message_json);
 
                 // TODO: handle errors
-                match handle_message(message_json, mpv.clone(), channel_id).await {
+                match handle_message(message_json, mpv.clone(), ingest.clone(), channel_id).await {
                     Ok(Some(response)) => {
                         tracing::trace!("Handled command from {:?} successfully, sending response", addr);
                         let message = Message::Text(json!({
@@ -449,6 +441,7 @@ pub enum WSCommand {
 async fn handle_message(
     message: Value,
     mpv: Mpv,
+    ingest: IngestQueue,
     _channel_id: u64,
 ) -> anyhow::Result<Option<Value>> {
     let command =
@@ -467,12 +460,7 @@ async fn handle_message(
         // }
         WSCommand::Load { urls } => {
             for url in urls {
-                mpv.playlist_add(
-                    &url,
-                    PlaylistAddTypeOptions::File,
-                    mpvipc_async::PlaylistAddOptions::Append,
-                )
-                .await?;
+                ingest.enqueue(url).await;
             }
             Ok(None)
         }
@@ -502,7 +490,7 @@ async fn handle_message(
             Ok(None)
         }
         WSCommand::PlaylistClear => {
-            mpv.playlist_clear().await?;
+            ingest.playlist_clear().await?;
             Ok(None)
         }
 
