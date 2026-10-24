@@ -4,7 +4,8 @@
 , rustPlatform
 , makeWrapper
 , mpv
-, wrapped ? false
+, yt-dlp
+, wrapped ? true
 , commitHash ? "unknown"
 , commitDate ? "unknown"
 , commitIsDirty ? false
@@ -49,7 +50,7 @@ rustPlatform.buildRustPackage rec {
 
   postInstall = lib.optionalString wrapped ''
     wrapProgram $out/bin/greg-ng \
-      --prefix PATH : '${lib.makeBinPath [ mpv ]}'
+      --prefix PATH : '${lib.makeBinPath [ mpv yt-dlp ]}'
   '';
 
   meta = with lib; {

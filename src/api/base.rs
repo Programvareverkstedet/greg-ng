@@ -1,20 +1,13 @@
-use mpvipc_async::{
-    LoopProperty, Mpv, MpvExt, NumberChangeOptions, PlaylistAddOptions, PlaylistAddTypeOptions,
-    SeekOptions, Switch,
-};
+use mpvipc_async::{LoopProperty, Mpv, MpvExt, NumberChangeOptions, SeekOptions, Switch};
 use serde_json::{Value, json};
 
+use crate::ingest::IngestQueue;
+
 /// Add item to playlist
-pub async fn loadfile(mpv: Mpv, path: &str) -> anyhow::Result<()> {
+pub async fn loadfile(ingest: IngestQueue, path: &str) -> anyhow::Result<()> {
     tracing::trace!("api::loadfile({:?})", path);
     tracing::info!("Adding to playlist: {}", path);
-    mpv.playlist_add(
-        path,
-        PlaylistAddTypeOptions::File,
-        PlaylistAddOptions::Append,
-    )
-    .await?;
-
+    ingest.enqueue(path.to_string()).await;
     Ok(())
 }
 
@@ -99,9 +92,6 @@ pub async fn playlist_get(mpv: Mpv) -> anyhow::Result<Value> {
               "current": item.current,
               "playing": is_playing,
               "filename": item.title.as_ref().unwrap_or(&item.filename),
-              "data": {
-                "fetching": true,
-              }
             })
         })
         .collect();
@@ -128,9 +118,9 @@ pub async fn playlist_goto(mpv: Mpv, index: usize) -> anyhow::Result<()> {
 }
 
 /// Clears the playlist
-pub async fn playlist_clear(mpv: Mpv) -> anyhow::Result<()> {
+pub async fn playlist_clear(ingest: IngestQueue) -> anyhow::Result<()> {
     tracing::trace!("api::playlist_clear()");
-    mpv.playlist_clear().await.map_err(|e| e.into())
+    ingest.playlist_clear().await
 }
 
 /// Remove an item from the playlist by index
