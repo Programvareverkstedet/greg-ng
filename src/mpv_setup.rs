@@ -102,6 +102,7 @@ async fn spawn_mpv(
         ))
         .arg("--load-unsafe-playlists")
         .arg("--keep-open") // Keep last frame of video on end of video
+        .env_remove("PYTHONPATH")
         .spawn()
         .context("Failed to start mpv")?;
 

@@ -99,6 +99,7 @@ fn spawn_entry_stream(url: String, cookies_path: PathBuf) -> anyhow::Result<Expa
         .arg("--extractor-args")
         .arg("youtube:skip=hls,dash")
         .arg(&url)
+        .env_remove("PYTHONPATH")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
