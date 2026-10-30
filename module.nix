@@ -110,6 +110,23 @@ in
               '';
             };
 
+            log_level = lib.mkOption {
+              type = lib.types.enum [
+                "no"
+                "fatal"
+                "error"
+                "warn"
+                "info"
+                "status"
+                "v"
+                "debug"
+                "trace"
+              ];
+              default = "info";
+              example = "v";
+              description = "The minimum level of mpv log messages to relay to the greg-ng log.";
+            };
+
             auto_start = lib.mkOption {
               type = with lib.types; nullOr bool;
               default = true;

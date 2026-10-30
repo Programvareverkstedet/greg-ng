@@ -112,8 +112,8 @@ async fn spawn_mpv(
     Ok((mpv, process_handle))
 }
 
-async fn relay_mpv_log_messages(mpv: Mpv) -> anyhow::Result<()> {
-    mpv.run_command_raw("request_log_messages", &["warn"])
+async fn relay_mpv_log_messages(mpv: Mpv, log_level: &str) -> anyhow::Result<()> {
+    mpv.run_command_raw("request_log_messages", &[log_level])
         .await
         .context("Failed to subscribe to mpv log messages")?;
 
@@ -195,7 +195,7 @@ pub async fn connect_to_mpv(
         (mpv, None)
     };
 
-    relay_mpv_log_messages(mpv.clone()).await?;
+    relay_mpv_log_messages(mpv.clone(), &mpv_config.log_level).await?;
 
     if let Err(e) = mpv
         .set_property(

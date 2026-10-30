@@ -46,7 +46,6 @@ where
 
 #[derive(Debug, Deserialize)]
 #[serde(default)]
-#[derive(Default)]
 pub struct MpvConfig {
     /// Location of the mpv socket to connect to, when not auto-starting mpv.
     pub socket_path: Option<String>,
@@ -63,6 +62,11 @@ pub struct MpvConfig {
     /// Defaults to `true` if `socket_path` is unset, false otherwise.
     pub auto_start: Option<bool>,
 
+    /// The minimum level of mpv log messages to relay to our own log.
+    ///
+    /// Ref <https://mpv.io/manual/stable/#options-msg-level>
+    pub log_level: String,
+
     /// A generated temporary file that contains mpv config.
     /// Keeping it here makes the temporary file bound to the lifetime of
     /// the configuration, so we won't have to worry too much about it in
@@ -71,6 +75,23 @@ pub struct MpvConfig {
     #[serde(skip)]
     pub resolved_config_file: Option<NamedTempFile>,
 }
+
+impl Default for MpvConfig {
+    fn default() -> Self {
+        Self {
+            socket_path: None,
+            executable_path: None,
+            config_file: None,
+            auto_start: None,
+            log_level: "info".to_string(),
+            resolved_config_file: None,
+        }
+    }
+}
+
+const MPV_LOG_LEVELS: [&str; 9] = [
+    "no", "fatal", "error", "warn", "info", "status", "v", "debug", "trace",
+];
 
 impl MpvConfig {
     pub fn should_auto_start(&self) -> bool {
@@ -98,6 +119,14 @@ fn validate(config: &Config) -> anyhow::Result<()> {
         anyhow::bail!(
             "Invalid `mpv` config: `auto_start` is set to false, but no `socket_path` was \
              given to connect to instead"
+        );
+    }
+
+    if !MPV_LOG_LEVELS.contains(&config.mpv.log_level.as_str()) {
+        anyhow::bail!(
+            "Invalid `mpv` config: `log_level` must be one of {}, got {:?}",
+            MPV_LOG_LEVELS.join(", "),
+            config.mpv.log_level
         );
     }
 
