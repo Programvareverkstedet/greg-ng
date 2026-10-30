@@ -144,6 +144,16 @@ async fn relay_mpv_log_messages(mpv: Mpv, log_level: &str) -> anyhow::Result<()>
     Ok(())
 }
 
+async fn log_mpv_versions(mpv: &Mpv) {
+    for property in ["mpv-version", "ffmpeg-version"] {
+        match mpv.get_property::<String>(property).await {
+            Ok(Some(version)) => tracing::info!("{}: {}", property, version),
+            Ok(None) => tracing::warn!("mpv did not report {}", property),
+            Err(e) => tracing::warn!("Failed to get {} from mpv: {}", property, e),
+        }
+    }
+}
+
 async fn connect_to_running_mpv(socket_path: &str) -> anyhow::Result<Mpv> {
     let path = Path::new(socket_path);
 
@@ -196,6 +206,7 @@ pub async fn connect_to_mpv(
     };
 
     relay_mpv_log_messages(mpv.clone(), &mpv_config.log_level).await?;
+    log_mpv_versions(&mpv).await;
 
     if let Err(e) = mpv
         .set_property(
