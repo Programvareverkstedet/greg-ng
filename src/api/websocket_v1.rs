@@ -467,6 +467,7 @@ async fn handle_message(
         // }
         WSCommand::Load { urls } => {
             for url in urls {
+                tracing::info!("Adding to playlist: {}", url);
                 mpv.playlist_add(
                     &url,
                     PlaylistAddTypeOptions::File,

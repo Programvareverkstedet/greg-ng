@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 /// Add item to playlist
 pub async fn loadfile(mpv: Mpv, path: &str) -> anyhow::Result<()> {
     tracing::trace!("api::loadfile({:?})", path);
+    tracing::info!("Adding to playlist: {}", path);
     mpv.playlist_add(
         path,
         PlaylistAddTypeOptions::File,
