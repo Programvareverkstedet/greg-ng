@@ -3,7 +3,7 @@ use axum::Router;
 use clap::Parser;
 use futures::StreamExt;
 use mpv_setup::{connect_to_mpv, show_grzegorz_image};
-use mpvipc_async::{Event, Mpv, MpvDataType, MpvExt};
+use mpvipc_async::{Event, EventEndFileReason, Mpv, MpvDataType, MpvExt};
 use std::{
     future::Future,
     pin::Pin,
@@ -170,6 +170,21 @@ fn send_play_status(
     }
 }
 
+fn log_end_file(path: Option<&str>, reason: &EventEndFileReason, error: Option<&str>) {
+    let path = path.unwrap_or("<unknown file>");
+    match reason {
+        EventEndFileReason::Error => tracing::warn!(
+            "Failed to play {}: {}",
+            path,
+            error.unwrap_or("unknown error")
+        ),
+        EventEndFileReason::Eof => tracing::info!("Finished playing {}", path),
+        EventEndFileReason::Stop => tracing::debug!("Stopped playing {}", path),
+        EventEndFileReason::Redirect => tracing::debug!("{} was expanded into a playlist", path),
+        other => tracing::debug!("Playback of {} ended: {:?}", path, other),
+    }
+}
+
 async fn start_status_notifier_thread(
     systemd: bool,
     mpv: Mpv,
@@ -185,12 +200,19 @@ async fn start_status_notifier_thread(
         if let Err(e) = mpv.observe_property(100, "pause").await {
             tracing::warn!("Failed to observe pause property: {}", e);
         }
+        if let Err(e) = mpv.observe_property(100, "path").await {
+            tracing::warn!("Failed to observe path property: {}", e);
+        }
 
         let mut current_song: Option<String> =
             mpv.get_property("media-title").await.unwrap_or_else(|e| {
                 tracing::warn!("Failed to get media-title property: {}", e);
                 None
             });
+        let mut current_path: Option<String> = mpv.get_property("path").await.unwrap_or_else(|e| {
+            tracing::warn!("Failed to get path property: {}", e);
+            None
+        });
         let mut playing = !mpv
             .get_property("pause")
             .await
@@ -241,6 +263,10 @@ async fn start_status_notifier_thread(
                                     }
                                     playing = now_playing;
                                 }
+                                ("path", Some(MpvDataType::String(s))) => {
+                                    current_path = Some(s);
+                                }
+                                ("path", _) => {}
                                 (event_name, _) => {
                                     tracing::trace!(
                                         "Received unexpected property change on systemd notifier thread: {}",
@@ -252,6 +278,9 @@ async fn start_status_notifier_thread(
                             if changed {
                                 send_play_status(systemd, playing, &current_song, connection_count, play_count);
                             }
+                        }
+                        Some(Ok(Event::EndFile { reason, file_error, .. })) => {
+                            log_end_file(current_path.as_deref(), &reason, file_error.as_deref());
                         }
                         Some(Ok(other)) => {
                             tracing::trace!(
