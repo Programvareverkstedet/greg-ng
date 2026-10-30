@@ -2,6 +2,14 @@
 let
   cfg = config.services.greg-ng;
   format = pkgs.formats.toml { };
+
+  mpvFormat = pkgs.formats.ini {
+    mkKeyValue = lib.generators.mkKeyValueDefault {
+      mkValueString = v:
+        if lib.isBool v then (if v then "yes" else "no")
+        else lib.generators.mkValueStringDefault { } v;
+    } "=";
+  };
 in
 {
   options.services.greg-ng = {
@@ -9,7 +17,31 @@ in
 
     package = lib.mkPackageOption pkgs "greg-ng" { };
 
-    mpvPackage = lib.mkPackageOption pkgs "mpv" { };
+    mpv = {
+      package = lib.mkPackageOption pkgs "mpv" { };
+
+      settings = lib.mkOption {
+        type = mpvFormat.type;
+        default = { };
+        example = {
+          default = {
+            hwdec = "vaapi";
+            gpu-api = "opengl";
+          };
+          youtube = {
+            profile-cond = "path:find('youtu%.?be')";
+            ytdl-format = "bestvideo[height<=?720][vcodec^=avc1]+bestaudio/best";
+          };
+        };
+        description = ''
+          The INI configuration for mpv.
+
+          See:
+          - <https://mpv.io/manual/stable/#options> for available options
+          - <https://mpv.io/manual/stable/#profiles> for info about profiles
+        '';
+      };
+    };
 
     enableSway = lib.mkEnableOption "sway as the main window manager";
 
@@ -59,9 +91,9 @@ in
 
             executable_path = lib.mkOption {
               type = lib.types.str;
-              default = lib.getExe cfg.mpvPackage;
+              default = lib.getExe cfg.mpv.package;
               defaultText = lib.literalExpression ''
-                lib.getExe config.services.greg-ng.mpvPackage
+                lib.getExe config.services.greg-ng.mpv.package
               '';
               description = ''
                 Path to the mpv executable.
@@ -69,10 +101,12 @@ in
             };
 
             config_file = lib.mkOption {
-              type = with lib.types; nullOr str;
-              default = null;
+              type = lib.types.str;
+              readOnly = true;
+              internal = true;
               description = ''
-                Path to a mpv config file.
+                Path to the mpv config file. Managed by the nix module,
+                use {option}`services.greg-ng.mpv.settings` to configure mpv.
               '';
             };
 
@@ -95,7 +129,22 @@ in
   };
 
   config = lib.mkMerge [
-    (lib.mkIf cfg.enable {
+    (let
+      mpvConfigFile = mpvFormat.generate "greg-ng-mpv.conf" (
+        lib.filterAttrsRecursive (_: v: v != null) cfg.mpv.settings
+      );
+    in lib.mkIf cfg.enable {
+      # See assets/default-mpv.conf
+      services.greg-ng.mpv.settings.default = {
+        volume-max = lib.mkDefault 100;
+        hwdec = lib.mkDefault "auto-safe";
+        cursor-autohide = lib.mkDefault "always";
+      };
+
+      environment.etc."greg-ng/mpv.conf".source = mpvConfigFile;
+
+      services.greg-ng.settings.mpv.config_file = "/etc/greg-ng/mpv.conf";
+
       systemd.user.sockets.greg-ng = {
         description = "Socket for greg-ng, an mpv based media player";
         wantedBy = [ "sockets.target" ];
@@ -108,6 +157,7 @@ in
         description = "greg-ng, an mpv based media player";
         wantedBy = [ "graphical-session.target" ];
         partOf = [ "graphical-session.target" ];
+        restartTriggers = [ mpvConfigFile ];
         serviceConfig = {
           Type = "notify";
           ExecStart = let
