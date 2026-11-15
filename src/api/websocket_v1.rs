@@ -511,6 +511,15 @@ async fn handle_message(
         WSCommand::PlaylistRemove { mut positions } => {
             positions.sort();
 
+            let requested = positions.len();
+            positions.dedup();
+            if positions.len() != requested {
+                tracing::warn!(
+                    "Ignoring {} duplicate position(s) in playlist_remove request",
+                    requested - positions.len()
+                );
+            }
+
             for position in positions.iter().rev() {
                 mpv.playlist_remove_id(*position).await?;
             }
