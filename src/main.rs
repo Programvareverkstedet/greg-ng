@@ -442,6 +442,10 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!("Running without systemd integration");
     }
 
+    let listener = bind_listener(&config.server).await.inspect_err(|e| {
+        tracing::error!("{:#}", e);
+    })?;
+
     let cookies_path = YtDlpCookiesState::default_path();
     YtDlpCookiesState::ensure_file_exists(&cookies_path)
         .context("Failed to create yt-dlp cookies file")?;
@@ -495,15 +499,6 @@ async fn main() -> anyhow::Result<()> {
         .merge(api::health_routes(health_checks))
         .merge(api::rest_api_docs(mpv.clone(), yt_dlp_cookies))
         .into_make_service_with_connect_info::<net::ApiClientAddr>();
-
-    let listener = match bind_listener(&config.server).await {
-        Ok(listener) => listener,
-        Err(e) => {
-            tracing::error!("{}", e);
-            shutdown(mpv, mpv_kill_tx).await;
-            return Err(e);
-        }
-    };
 
     let sigterm =
         unix::signal(unix::SignalKind::terminate()).context("Failed to install SIGTERM handler")?;

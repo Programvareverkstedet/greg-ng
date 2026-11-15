@@ -23,7 +23,7 @@ const_format = "0.2.37"
 futures = "0.3.34"
 humantime = "2.4.0"
 mpvipc-async = { git = "https://git.pvv.ntnu.no/Grzegorz/mpvipc-async.git", branch = "main" }
-nix = { version = "0.31", features = ["socket"] }
+nix = { version = "0.31", features = ["fs", "socket"] }
 sd-notify = "0.5.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"

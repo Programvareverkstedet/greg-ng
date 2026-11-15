@@ -7,7 +7,10 @@ use std::{
 use anyhow::Context;
 use futures::StreamExt;
 use mpvipc_async::{Event, EventLogMessageLevel, Mpv, MpvExt};
-use nix::sys::socket::{AddressFamily, SockFlag, SockType, socketpair};
+use nix::{
+    fcntl::{FcntlArg, FdFlag, fcntl},
+    sys::socket::{AddressFamily, SockFlag, SockType, socketpair},
+};
 use tempfile::NamedTempFile;
 use tokio::process::{Child, Command};
 
@@ -51,9 +54,12 @@ fn create_mpv_ipc_socketpair() -> anyhow::Result<(tokio::net::UnixStream, OwnedF
         AddressFamily::Unix,
         SockType::Stream,
         None,
-        SockFlag::empty(),
+        SockFlag::SOCK_CLOEXEC,
     )
     .context("Failed to create mpv IPC socketpair")?;
+
+    fcntl(&rx_fd, FcntlArg::F_SETFD(FdFlag::empty()))
+        .context("Failed to clear CLOEXEC FOR mpv's socket")?;
 
     let tx_std = std::os::unix::net::UnixStream::from(tx_fd);
     tx_std.set_nonblocking(true)?;
@@ -102,6 +108,7 @@ async fn spawn_mpv(
         ))
         .arg("--load-unsafe-playlists")
         .arg("--keep-open") // Keep last frame of video on end of video
+        .kill_on_drop(true)
         .spawn()
         .context("Failed to start mpv")?;
 
