@@ -97,7 +97,7 @@ pub async fn playlist_get(mpv: Mpv) -> anyhow::Result<Value> {
             json!({
               "index": i,
               "current": item.current,
-              "playing": is_playing,
+              "playing": item.current && is_playing,
               "filename": item.title.as_ref().unwrap_or(&item.filename),
               "data": {
                 "fetching": true,
