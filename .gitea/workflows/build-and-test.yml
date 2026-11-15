@@ -83,7 +83,7 @@ jobs:
         run: |
           grcov \
             --source-dir . \
-            --binary-path ./target/release/deps/ \
+            --binary-path ./target/release/ \
             --excl-start 'mod test* \{' \
             --ignore 'tests/*' \
             --ignore "*test.rs" \
