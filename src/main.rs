@@ -15,10 +15,7 @@ use tokio::{
     task::JoinHandle,
 };
 use tracing_subscriber::{Layer, filter::FilterExt, layer::SubscriberExt};
-use util::{
-    ConnectionEvent, HealthCheckRegistry, HealthCheckRequest, IdPool, YtDlpCookiesState,
-    default_cookies_path, ensure_cookies_file_exists,
-};
+use util::{ConnectionEvent, HealthCheckRegistry, HealthCheckRequest, IdPool, YtDlpCookiesState};
 
 mod api;
 mod config;
@@ -445,8 +442,9 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!("Running without systemd integration");
     }
 
-    let cookies_path = default_cookies_path();
-    ensure_cookies_file_exists(&cookies_path).context("Failed to create yt-dlp cookies file")?;
+    let cookies_path = YtDlpCookiesState::default_path();
+    YtDlpCookiesState::ensure_file_exists(&cookies_path)
+        .context("Failed to create yt-dlp cookies file")?;
     let (mpv, proc) = connect_to_mpv(&mut config.mpv, &cookies_path, args.headless)
         .await
         .context("Failed to connect to mpv")?;
