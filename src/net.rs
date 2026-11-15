@@ -1,8 +1,4 @@
-use std::{
-    net::{IpAddr, SocketAddr},
-    os::fd::FromRawFd,
-    sync::Arc,
-};
+use std::{net::SocketAddr, os::fd::FromRawFd, sync::Arc};
 
 use anyhow::Context;
 use axum::{extract::connect_info::Connected, serve::IncomingStream};
@@ -90,14 +86,36 @@ fn listener_from_raw_fd(fd: std::os::fd::RawFd) -> anyhow::Result<ApiListener> {
 
 /// Helper function to resolve a hostname to an IP address.
 /// Why is this not in the standard library? >:(
-async fn resolve(host: &str) -> anyhow::Result<IpAddr> {
-    let addr = format!("{}:0", host);
-    let addresses = tokio::net::lookup_host(addr).await?;
-    addresses
-        .into_iter()
-        .find(|addr| addr.is_ipv4())
-        .map(|addr| addr.ip())
-        .ok_or_else(|| anyhow::anyhow!("Failed to resolve address"))
+async fn resolve(host: &str, port: u16) -> anyhow::Result<Vec<SocketAddr>> {
+    let host = host
+        .strip_prefix('[')
+        .and_then(|h| h.strip_suffix(']'))
+        .unwrap_or(host);
+
+    let mut addresses: Vec<SocketAddr> = tokio::net::lookup_host((host, port)).await?.collect();
+    addresses.sort_by_key(|addr| !addr.is_ipv4());
+    addresses.dedup();
+
+    if addresses.is_empty() {
+        anyhow::bail!("{host} did not resolve to any addresses");
+    }
+    Ok(addresses)
+}
+
+/// Binds to the first of `addresses` that succeeds.
+async fn bind_any(addresses: &[SocketAddr]) -> anyhow::Result<TcpListener> {
+    let mut last_error = None;
+    for addr in addresses {
+        match TcpListener::bind(addr).await {
+            Ok(listener) => return Ok(listener),
+            Err(e) => {
+                tracing::debug!("Failed to bind API server to {addr}: {e}");
+                last_error =
+                    Some(anyhow::Error::new(e).context(format!("Failed to bind to {addr}")));
+            }
+        }
+    }
+    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("No addresses to bind to")))
 }
 
 /// Either receives a socket-activated listener from systemd, or binds a
@@ -121,14 +139,16 @@ pub async fn bind_listener(server: &ServerConfig) -> anyhow::Result<ApiListener>
         return Ok(listener);
     }
 
-    let addr = resolve(&server.host)
+    let addresses = resolve(&server.host, server.port)
         .await
-        .context(format!("Failed to resolve address: {}", server.host))?;
-    let socket_addr = SocketAddr::new(addr, server.port);
-    tracing::info!("Starting API on {}", socket_addr);
+        .with_context(|| format!("Failed to resolve address: {}", server.host))?;
 
-    let listener = tokio::net::TcpListener::bind(&socket_addr)
-        .await
-        .context(format!("Failed to bind API server to '{}'", socket_addr))?;
+    let listener = bind_any(&addresses).await.with_context(|| {
+        format!(
+            "Failed to bind API server to '{}' (port {})",
+            server.host, server.port
+        )
+    })?;
+    tracing::info!("Starting API on {}", listener.local_addr()?);
     Ok(ApiListener::Tcp(listener))
 }
