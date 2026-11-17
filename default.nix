@@ -3,6 +3,10 @@
 , fetchFromGitHub
 , rustPlatform
 , makeWrapper
+, pkg-config
+, zstd
+, libgit2
+, zlib
 , mpv
 , wrapped ? false
 , commitHash ? "unknown"
@@ -38,7 +42,16 @@ rustPlatform.buildRustPackage rec {
     GIT_DIRTY = lib.boolToString commitIsDirty;
   };
 
-  nativeBuildInputs = [ makeWrapper ];
+  nativeBuildInputs = [
+    makeWrapper
+    pkg-config
+  ];
+
+  buildInputs = [
+    libgit2
+    zlib
+    zstd
+  ];
 
   cargoLock = {
     lockFile = ./Cargo.lock;
